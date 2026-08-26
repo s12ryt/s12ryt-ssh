@@ -51,3 +51,5 @@
 - 執行 `go get golang.org/x/image@v0.45.0` 與 `go mod tidy`，`go list -m` 確認安全版本；`go mod verify` 通過。
 - 新增 `.playwright-mcp/` 至 `.gitignore`。
 - 本輪未執行任何本地 i18n 測試；`go vet ./...`、`go build ./...`、`gofmt`、TUI dependency check 通過。下一步為原子提交、推送及 GitHub CI 驗證。
+- 依 git-master 規則建立 5 個英文 plain-style 原子提交並推送 `main`；GitHub Actions run `33002069967` 的 Go 1.25.x/1.26.x test、vet、build、Windows GUI build、govulncheck、secret scan 全部成功。
+- GitHub run 顯示 Node.js 20 action deprecation annotation，屬非阻塞警告，未影響 CI 結果；本地仍未執行 i18n 測試。

@@ -56,3 +56,5 @@
 - 補充 `.gitignore` 排除 `.playwright-mcp/`，避免瀏覽器工具產物進入 repository。
 - 使用者指定 i18n 測試改由 GitHub Actions CI 執行；本輪未再次執行本地 i18n 測試。
 - 本地 `gofmt`、`go vet ./...`、`go build ./...`、`go mod verify` 與 TUI 依賴檢查通過；尚待提交、推送並以新的 GitHub Actions run 驗證測試與 govulncheck。
+- 已建立 5 個英文 plain-style 原子提交並推送至 `main`；GitHub Actions run `33002069967` 全部通過：Go 1.25.x/1.26.x 測試、vet、build、Windows GUI build、govulncheck 與 secret scan。
+- 該 run 僅有 actions/checkout、actions/setup-go 與 gitleaks 使用 Node.js 20 的棄用提示，未影響結果；可在後續獨立升級 workflow action major version。
