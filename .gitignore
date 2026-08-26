@@ -2,7 +2,7 @@
 config.json
 metadata.json
 preferences.json
-securestore/
+/securestore/
 
 # Build outputs and temporary test binaries
 s12ryt-ssh
