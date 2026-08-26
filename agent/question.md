@@ -22,6 +22,9 @@
 - 所有畫面右上角提供全域「中 / EN」切換按鈕，按下後立即切換，不需重新啟動或重新登入。
 - 語言偏好跨重啟保存到不含敏感資料的本機偏好設定。
 - 翻譯範圍包含應用程式自己的按鈕、標籤、提示、狀態、空資料訊息與輸入驗證錯誤；SSH/S3/SQL 等外部服務回傳的原始錯誤保留原文，避免扭曲診斷資訊。
+- 專案推送至公開 GitHub repository `s12ryt/s12ryt-ssh`，使用 `main` 分支直接推送，不建立 Pull Request。
+- CI workflow 於 push 與 Pull Request 執行，使用 Go 1.25.x/1.26.x 矩陣，涵蓋測試、vet、一般 build、Windows GUI build、govulncheck 與秘密掃描。
+- Release workflow 於 `vX.Y.Z` tag 或手動 dispatch 觸發，建立 Windows amd64/arm64 GUI 發行包、SHA-256 checksums 與 GitHub Release。
 
 ## 實作決策
 
@@ -37,6 +40,7 @@
 - 使用集中式翻譯 key 與英文/繁體中文字典，禁止在 Gio layout 中分散判斷語言。
 - 語言偏好使用版本化 JSON，與 `metadata.json`、DPAPI `securestore/` 分離；只保存語言代碼，不保存任何 profile 或 bootstrap secret。
 - 狀態與應用程式錯誤保存為翻譯 key，在繪製時依目前語言解析，確保切換後既有畫面訊息也能立即更新。
+- 公開 repository 不追蹤 `config.json`、metadata、preferences、securestore、本機執行檔與測試執行檔；GitHub Actions 以 Windows runner 執行需要 Windows API 的 build/test。
 
 ## 驗收標準
 
@@ -52,6 +56,7 @@
 - 「中 / EN」按鈕在設定、登入、復原與工作區畫面均可使用，且切換後所有應用程式文案立即更新。
 - 無效或缺少語言偏好檔時安全回退英文；偏好檔不得包含 profile、密碼、access key、secret key 或 bootstrap 資料。
 - 英文與繁體中文字典對所有 GUI 使用的翻譯 key 具完整覆蓋，新增測試防止漏翻或回退成 key 字串。
+- GitHub `main` 分支存在且遠端工作樹乾淨；CI 與 Release workflow 已提交並可由 GitHub Actions 觸發。
 
 ## 不在本次範圍
 

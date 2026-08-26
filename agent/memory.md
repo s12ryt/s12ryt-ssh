@@ -31,3 +31,14 @@
 - i18n 正式碼新增 `KeyStatusUnlock` 英文/繁體中文翻譯；`Text` 維持本機偏好錯誤前綴翻譯及外部錯誤尾端原文保留。
 - 重新執行 `gofmt`、`go vet ./...`、`go build ./...` 均通過；依賴樹過濾輸出 `No TUI dependencies found`。
 - 本輪未產生或執行新的 `.exe`，所以 Windows GUI linker build 未驗證；race 仍因 `CGO_ENABLED=0` 不可用，gopls 未安裝。
+
+## GitHub 推送
+
+- 使用者確認目標為公開 repository `s12ryt/s12ryt-ssh`、`main` 分支、直接推送。
+- 執行 `git init -b main`，以 `.gitignore` 排除本機設定、securestore、執行檔與測試執行檔；修正 `/securestore/` 規則後確認 `internal/securestore` 仍被追蹤。
+- 依 git-master 規則使用 `$env:GIT_MASTER='1'` 執行 Git 命令，建立 19 個英文 plain-style 原子提交，並設定 `origin`。
+- 新增並提交 `.github/workflows/ci.yml`：push/PR、Go 1.25.x/1.26.x、Windows test/vet/build、GUI linker build、govulncheck、gitleaks。
+- 新增並提交 `.github/workflows/release.yml`：`vX.Y.Z` tag 或 dispatch、Windows amd64/arm64、ZIP、checksums、GitHub Release。
+- `git push -u origin main` 成功；遠端為 `https://github.com/s12ryt/s12ryt-ssh`，本地狀態為 `main...origin/main` 且乾淨。
+- GitHub workflow 檔案已透過 GitHub API 驗證存在。`go vet ./...`、`go build ./...`、`git diff --check` 與常見憑證 pattern scan 通過。
+- 未執行最新 `go test`、Windows linker build、`actionlint`；原因分別為防毒隔離測試執行檔、避免產生新的 `.exe`、工具未安裝。這些限制需在交付報告中明確標示。

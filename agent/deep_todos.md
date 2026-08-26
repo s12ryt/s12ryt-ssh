@@ -36,3 +36,14 @@
 - 已執行 `gofmt`、`go vet ./...`、`go build ./...`，均通過；`go list -deps .` 過濾結果為 `No TUI dependencies found`。
 - 本輪未執行 `go test`，因 Windows 防毒曾將 `internal/i18n` 測試執行檔判定為 `Ransom/Genasom.p` 並隔離；因此本輪新增 i18n 測試及全套測試不能宣稱 GREEN。
 - 本輪未執行 Windows linker build，以避免再次產生 `.exe`；`go test -race` 仍受 `CGO_ENABLED=0` 限制，`gopls` 未安裝。
+
+## 2026-08-27：GitHub、CI 與 Release
+
+- 使用者確認建立公開 repository `https://github.com/s12ryt/s12ryt-ssh`，直接推送 `main`，不建立 Pull Request。
+- 建立根目錄 `.gitignore`，排除 `config.json`、metadata、preferences、`/securestore/`、本機執行檔與測試執行檔；修正過寬的 `securestore/` 規則，保留 `internal/securestore` 正式程式碼。
+- 以 19 個英文 plain-style 原子提交建立本地 Git 歷史，避免將不同模組、文件與 workflow 混成單一大型提交。
+- 新增 `.github/workflows/ci.yml`：Go 1.25.x/1.26.x、Windows test/vet/build、Windows GUI build、Windows dependency govulncheck，以及 gitleaks 秘密掃描。
+- 新增 `.github/workflows/release.yml`：限制 `vX.Y.Z` 版本格式，支援 tag/手動觸發，編譯 Windows amd64/arm64、產生 ZIP 與 SHA-256 checksums 並建立 GitHub Release。
+- 已成功設定 `origin` 並推送 `main` 至 `origin/main`；遠端 workflow 與最新提交已用 GitHub API 驗證。
+- 推送前 `go vet ./...`、`go build ./...`、`git diff --check` 與秘密 pattern 檢查通過；本機工作樹乾淨。
+- `actionlint` 未安裝；本機最新版本仍未執行 `go test`，因防毒隔離 `internal/i18n` 測試執行檔；Windows GUI linker build 亦未重新執行，避免再次產生 `.exe`。
