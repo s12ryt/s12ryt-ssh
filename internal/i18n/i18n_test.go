@@ -65,6 +65,15 @@ func TestTranslationsExistInBothLanguages(t *testing.T) {
 	}
 }
 
+func TestBytesTranslationUsesHumanReadableEnglishLabel(t *testing.T) {
+	if got := T(English, KeyBytes); got != "Bytes" {
+		t.Fatalf("English bytes label = %q, want %q", got, "Bytes")
+	}
+	if got := Text(TraditionalChinese, "Bytes"); got != "位元組" {
+		t.Fatalf("Chinese bytes label = %q, want %q", got, "位元組")
+	}
+}
+
 func TestGUIStringsTranslateToTraditionalChinese(t *testing.T) {
 	sources := []string{
 		"Save this recovery key before continuing.",
@@ -72,6 +81,7 @@ func TestGUIStringsTranslateToTraditionalChinese(t *testing.T) {
 		"Connecting to SSH host...",
 		"Unlocking encrypted vault...",
 		"PostgreSQL SSL mode (default require)",
+		"Bytes",
 		"vault name and password are required",
 		"S3 endpoint, bucket, access key, and secret key are required",
 		"SQL type, host, port, user, password, and database are required",
