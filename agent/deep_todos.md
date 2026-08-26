@@ -58,3 +58,14 @@
 - 本地 `gofmt`、`go vet ./...`、`go build ./...`、`go mod verify` 與 TUI 依賴檢查通過；尚待提交、推送並以新的 GitHub Actions run 驗證測試與 govulncheck。
 - 已建立 5 個英文 plain-style 原子提交並推送至 `main`；GitHub Actions run `33002069967` 全部通過：Go 1.25.x/1.26.x 測試、vet、build、Windows GUI build、govulncheck 與 secret scan。
 - 該 run 僅有 actions/checkout、actions/setup-go 與 gitleaks 使用 Node.js 20 的棄用提示，未影響結果；可在後續獨立升級 workflow action major version。
+
+## 2026-08-27：README 儲存與 SQL 設定參考
+
+- 使用者確認 README 需同時說明首次設定的 Vault backend，以及登入後的 S3/R2 與 SQL 工作區 profile。
+- README 新增設定模型，明確區分本機 DPAPI bootstrap、遠端加密 vault 與登入後工作區 profile 的保存位置和用途。
+- README 新增 R2/S3 共用欄位、Cloudflare R2、AWS S3、MinIO 與通用 S3 相容服務設定範例，包含 endpoint、region、bucket、static credentials 與 Path-style 判斷。
+- README 說明 S3 Vault 所需的 `ListObjectsV2`、`GetObject`、`PutObject`、`DeleteObject` 權限，以及不支援 STS session token、自訂 CA、Unix socket、SSH tunnel 和額外 DSN 參數等限制。
+- README 新增 MySQL/MariaDB 與 PostgreSQL 欄位表、TLS/SSL mode 行為、預設值、SQL Vault `s12ryt_vault` schema、必要資料庫權限與工作區 Tables/Query/Exec 行為。
+- README 補充 DPAPI、AES-GCM、HTTPS/TLS、最小權限帳號與憑證輪換安全注意事項，並加入 Cloudflare、AWS、MinIO、MySQL driver 與 pgx 官方參考連結。
+- 本次為純文件變更，未新增執行測試；以章節、欄位、連結人工檢查、敏感字串 pattern 檢查與 `git diff --check` 作替代驗證，均通過。
+- 本次未執行 commit 或 push，待使用者明確要求後再依 git-master 規則處理。

@@ -53,3 +53,12 @@
 - 本輪未執行任何本地 i18n 測試；`go vet ./...`、`go build ./...`、`gofmt`、TUI dependency check 通過。下一步為原子提交、推送及 GitHub CI 驗證。
 - 依 git-master 規則建立 5 個英文 plain-style 原子提交並推送 `main`；GitHub Actions run `33002069967` 的 Go 1.25.x/1.26.x test、vet、build、Windows GUI build、govulncheck、secret scan 全部成功。
 - GitHub run 顯示 Node.js 20 action deprecation annotation，屬非阻塞警告，未影響 CI 結果；本地仍未執行 i18n 測試。
+
+## README 設定文件
+
+- 讀取 `README.md`、`internal/config/config.go`、`internal/storage/s3.go`、`internal/database/database.go`、`internal/vault/backend.go` 與 `internal/app/service.go`，以實際欄位和行為為文件依據。
+- 在 README 的使用方式後新增 Vault 與工作區 profile 的設定模型，說明 bootstrap secret 使用 Windows DPAPI、工作區 profile 進入遠端加密 vault，且 Vault backend 只選 R2/S3 或 SQL 其中一種。
+- 新增 Cloudflare R2、AWS S3、MinIO 與通用 S3 相容服務設定參考；明確說明 endpoint、region、bucket、static credentials、Path-style，以及 vault/工作區所需 S3 API 權限。
+- 新增 MySQL/MariaDB 與 PostgreSQL 設定參考；記錄 MySQL `TLSMode` 預設 `true`、PostgreSQL `SSLMode` 預設 `require`、安全模式差異，以及 SQL Vault 所需 schema 和權限。
+- 文件明確列出目前未支援的 STS session token、自訂 CA 欄位、Unix socket、內建 SSH tunnel 與額外 DSN query parameter，避免使用者依文件設定不存在的功能。
+- README 驗證：章節與欄位 grep 通過，常見 access key/token/private key pattern 未命中，`git diff --check` 通過；本次未執行 go test，也未執行 Git commit/push。
