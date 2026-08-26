@@ -26,6 +26,10 @@
 - CI workflow 於 push 與 Pull Request 執行，使用 Go 1.25.x/1.26.x 矩陣，涵蓋測試、vet、一般 build、Windows GUI build、govulncheck 與秘密掃描。
 - Release workflow 於 `vX.Y.Z` tag 或手動 dispatch 觸發，建立 Windows amd64/arm64 GUI 發行包、SHA-256 checksums 與 GitHub Release。
 - i18n 測試不在本機執行，改由推送後的 GitHub Actions CI 自動驗證，避免 Windows 防毒再次攔截測試執行檔。
+- README 提供完整的 R2/S3 相容儲存與 SQL 設定參考。
+- 設定文件同時涵蓋首次設定精靈使用的遠端 vault backend，以及登入後工作區使用的 S3/R2 與 SQL profile。
+- S3 相容範例涵蓋 Cloudflare R2、AWS S3、MinIO，並說明通用 S3 相容服務可依相同欄位套用。
+- 文件提供欄位意義、可用值、安全預設與可直接套用的設定範例；本次不擴張成完整權限管理或故障排除手冊。
 
 ## 實作決策
 
@@ -43,6 +47,8 @@
 - 狀態與應用程式錯誤保存為翻譯 key，在繪製時依目前語言解析，確保切換後既有畫面訊息也能立即更新。
 - 公開 repository 不追蹤 `config.json`、metadata、preferences、securestore、本機執行檔與測試執行檔；GitHub Actions 以 Windows runner 執行需要 Windows API 的 build/test。
 - CI 的 i18n 測試由 GitHub Actions 執行；本機驗證僅使用不啟動 i18n 測試執行檔的格式化、靜態分析、建置與依賴檢查。
+- README 的設定值必須以目前 `config.S3Profile`、`config.DBProfile`、S3 client 與 SQL DSN 實作為準，不記載 GUI 或 backend 尚未支援的選項。
+- 文件必須區分 vault backend 與工作區 profile：前者保存加密 vault 密文，後者提供登入後的物件與資料庫操作；同一組遠端服務可使用不同 bucket、database 或最小權限帳號。
 
 ## 驗收標準
 
@@ -59,6 +65,8 @@
 - 無效或缺少語言偏好檔時安全回退英文；偏好檔不得包含 profile、密碼、access key、secret key 或 bootstrap 資料。
 - 英文與繁體中文字典對所有 GUI 使用的翻譯 key 具完整覆蓋，新增測試防止漏翻或回退成 key 字串。
 - GitHub `main` 分支存在且遠端工作樹乾淨；CI 與 Release workflow 已提交並可由 GitHub Actions 觸發。
+- README 可讓使用者依欄位表完成 R2、AWS S3、MinIO、MySQL 與 PostgreSQL 設定，並能判斷何時啟用 path-style、MySQL TLS mode 與 PostgreSQL SSL mode。
+- README 明確說明 bootstrap secret 由 Windows DPAPI 保存、工作區 profile 進入遠端加密 vault，且範例不得包含真實憑證。
 
 ## 不在本次範圍
 
