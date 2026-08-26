@@ -25,6 +25,7 @@
 - 專案推送至公開 GitHub repository `s12ryt/s12ryt-ssh`，使用 `main` 分支直接推送，不建立 Pull Request。
 - CI workflow 於 push 與 Pull Request 執行，使用 Go 1.25.x/1.26.x 矩陣，涵蓋測試、vet、一般 build、Windows GUI build、govulncheck 與秘密掃描。
 - Release workflow 於 `vX.Y.Z` tag 或手動 dispatch 觸發，建立 Windows amd64/arm64 GUI 發行包、SHA-256 checksums 與 GitHub Release。
+- i18n 測試不在本機執行，改由推送後的 GitHub Actions CI 自動驗證，避免 Windows 防毒再次攔截測試執行檔。
 
 ## 實作決策
 
@@ -41,6 +42,7 @@
 - 語言偏好使用版本化 JSON，與 `metadata.json`、DPAPI `securestore/` 分離；只保存語言代碼，不保存任何 profile 或 bootstrap secret。
 - 狀態與應用程式錯誤保存為翻譯 key，在繪製時依目前語言解析，確保切換後既有畫面訊息也能立即更新。
 - 公開 repository 不追蹤 `config.json`、metadata、preferences、securestore、本機執行檔與測試執行檔；GitHub Actions 以 Windows runner 執行需要 Windows API 的 build/test。
+- CI 的 i18n 測試由 GitHub Actions 執行；本機驗證僅使用不啟動 i18n 測試執行檔的格式化、靜態分析、建置與依賴檢查。
 
 ## 驗收標準
 

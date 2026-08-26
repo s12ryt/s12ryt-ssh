@@ -47,3 +47,12 @@
 - 已成功設定 `origin` 並推送 `main` 至 `origin/main`；遠端 workflow 與最新提交已用 GitHub API 驗證。
 - 推送前 `go vet ./...`、`go build ./...`、`git diff --check` 與秘密 pattern 檢查通過；本機工作樹乾淨。
 - `actionlint` 未安裝；本機最新版本仍未執行 `go test`，因防毒隔離 `internal/i18n` 測試執行檔；Windows GUI linker build 亦未重新執行，避免再次產生 `.exe`。
+
+## 2026-08-27：修復 GitHub CI
+
+- GitHub Actions run `33000629262` 顯示 Go 1.25.x/1.26.x 的 i18n 測試失敗：英文 `KeyBytes` 值與內部 key 同為 `bytes`，被完整性測試判定為缺少翻譯。
+- 先新增 `TestBytesTranslationUsesHumanReadableEnglishLabel` 回歸測試，再將英文 canonical 文案改為 `Bytes`，同步修正 GUI 的下載與物件列表來源；繁中仍顯示 `位元組`。
+- govulncheck 發現 `golang.org/x/image v0.26.0` 的 4 個 TIFF 漏洞（GO-2026-5066、GO-2026-5062、GO-2026-5032、GO-2026-4815），已透過 Go module 命令升級至 `v0.45.0` 並執行 `go mod tidy`。
+- 補充 `.gitignore` 排除 `.playwright-mcp/`，避免瀏覽器工具產物進入 repository。
+- 使用者指定 i18n 測試改由 GitHub Actions CI 執行；本輪未再次執行本地 i18n 測試。
+- 本地 `gofmt`、`go vet ./...`、`go build ./...`、`go mod verify` 與 TUI 依賴檢查通過；尚待提交、推送並以新的 GitHub Actions run 驗證測試與 govulncheck。

@@ -42,3 +42,12 @@
 - `git push -u origin main` 成功；遠端為 `https://github.com/s12ryt/s12ryt-ssh`，本地狀態為 `main...origin/main` 且乾淨。
 - GitHub workflow 檔案已透過 GitHub API 驗證存在。`go vet ./...`、`go build ./...`、`git diff --check` 與常見憑證 pattern scan 通過。
 - 未執行最新 `go test`、Windows linker build、`actionlint`；原因分別為防毒隔離測試執行檔、避免產生新的 `.exe`、工具未安裝。這些限制需在交付報告中明確標示。
+
+## CI 修復
+
+- 讀取 GitHub Actions run `33000629262` 失敗日誌，確認 i18n `KeyBytes: "bytes"` 觸發翻譯完整性測試失敗，以及 `golang.org/x/image v0.26.0` 觸發 4 個 govulncheck TIFF 漏洞。
+- 先新增 `TestBytesTranslationUsesHumanReadableEnglishLabel` 作 RED 回歸測試；本機嘗試執行時測試執行檔被 Windows 回報 `Access is denied`，因此依使用者要求不再於本機執行 i18n 測試，改交 GitHub Actions。
+- 將 `KeyBytes` 英文文案與 GUI source 改為 `Bytes`，下載輸出與物件列表均使用集中式翻譯來源。
+- 執行 `go get golang.org/x/image@v0.45.0` 與 `go mod tidy`，`go list -m` 確認安全版本；`go mod verify` 通過。
+- 新增 `.playwright-mcp/` 至 `.gitignore`。
+- 本輪未執行任何本地 i18n 測試；`go vet ./...`、`go build ./...`、`gofmt`、TUI dependency check 通過。下一步為原子提交、推送及 GitHub CI 驗證。
