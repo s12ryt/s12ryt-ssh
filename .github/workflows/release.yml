@@ -1,0 +1,106 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+    inputs:
+      version:
+        description: Release tag in the form vX.Y.Z
+        required: true
+        type: string
+
+permissions:
+  contents: write
+
+jobs:
+  prepare:
+    name: Validate release version
+    runs-on: ubuntu-latest
+    outputs:
+      tag: ${{ steps.version.outputs.tag }}
+    steps:
+      - name: Validate version tag
+        id: version
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          INPUT_VERSION: ${{ inputs.version }}
+        run: |
+          tag="$GITHUB_REF_NAME"
+          if [ "$EVENT_NAME" = "workflow_dispatch" ]; then
+            tag="$INPUT_VERSION"
+          fi
+          if [[ ! "$tag" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "Invalid release tag: $tag" >&2
+            exit 1
+          fi
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+
+  build:
+    name: Build Windows ${{ matrix.goarch }}
+    needs: prepare
+    runs-on: windows-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        goarch:
+          - amd64
+          - arm64
+    env:
+      CGO_ENABLED: '0'
+      GOOS: windows
+      GOARCH: ${{ matrix.goarch }}
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.26.x'
+          cache: true
+
+      - name: Build Windows GUI executable
+        shell: pwsh
+        env:
+          OUTPUT: s12ryt-ssh-windows-${{ matrix.goarch }}.exe
+        run: |
+          go build -ldflags='-H windowsgui' -o $env:OUTPUT .
+          Compress-Archive -Path $env:OUTPUT -DestinationPath "$env:OUTPUT.zip"
+          Remove-Item $env:OUTPUT
+
+      - name: Upload release artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-${{ matrix.goarch }}
+          path: s12ryt-ssh-windows-${{ matrix.goarch }}.exe.zip
+          if-no-files-found: error
+
+  publish:
+    name: Publish GitHub Release
+    needs:
+      - prepare
+      - build
+    runs-on: ubuntu-latest
+    env:
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - name: Download release artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: dist
+
+      - name: Create checksums
+        working-directory: dist
+        run: find . -type f -name '*.zip' -exec sha256sum {} + > checksums.txt
+
+      - name: Create GitHub Release
+        run: |
+          gh release create "${{ needs.prepare.outputs.tag }}" \
+            dist/*/*.zip \
+            dist/checksums.txt \
+            --repo "$GITHUB_REPOSITORY" \
+            --target "${{ github.sha }}" \
+            --title "${{ needs.prepare.outputs.tag }}" \
+            --generate-notes
