@@ -589,7 +589,7 @@ func (ui *Window) handleStorage(gtx layout.Context) {
 				}
 			}
 			return func() {
-				ui.storageText = fmt.Sprintf("%s%d bytes%s", ui.text("Downloaded "), len(data), ui.downloadedTo(path))
+				ui.storageText = fmt.Sprintf("%s%d %s%s", ui.text("Downloaded "), len(data), ui.text("Bytes"), ui.downloadedTo(path))
 			}, nil
 		})
 	}
@@ -1082,7 +1082,7 @@ func (ui *Window) formatObjects(objects []storage.Object) string {
 	}
 	var b strings.Builder
 	for _, object := range objects {
-		fmt.Fprintf(&b, "%s  (%d %s)\n", object.Key, object.Size, ui.text("bytes"))
+		fmt.Fprintf(&b, "%s  (%d %s)\n", object.Key, object.Size, ui.text("Bytes"))
 	}
 	return b.String()
 }
@@ -1535,7 +1535,7 @@ func formatObjects(objects []storage.Object) string {
 	}
 	var b strings.Builder
 	for _, object := range objects {
-		fmt.Fprintf(&b, "%s  (%d bytes)\n", object.Key, object.Size)
+		fmt.Fprintf(&b, "%s  (%d Bytes)\n", object.Key, object.Size)
 	}
 	return b.String()
 }
