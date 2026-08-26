@@ -1,0 +1,18 @@
+# Local credentials and application state
+config.json
+metadata.json
+preferences.json
+securestore/
+
+# Build outputs and temporary test binaries
+s12ryt-ssh
+s12ryt-ssh.exe
+*.test
+*.test.exe
+
+# IDE and OS files
+.idea/
+.vscode/
+*.swp
+Thumbs.db
+Desktop.ini
