@@ -30,6 +30,26 @@
 - 設定文件同時涵蓋首次設定精靈使用的遠端 vault backend，以及登入後工作區使用的 S3/R2 與 SQL profile。
 - S3 相容範例涵蓋 Cloudflare R2、AWS S3、MinIO，並說明通用 S3 相容服務可依相同欄位套用。
 - 文件提供欄位意義、可用值、安全預設與可直接套用的設定範例；本次不擴張成完整權限管理或故障排除手冊。
+- 新增可由 Node.js 22 啟動的 Telegram Bot 身分驗證服務端，程式碼放在 repository 的 `server/`，使用 TypeScript 與 npm。
+- 服務端使用 Fastify v5 提供版本化 REST API，使用 grammY 提供 Telegram Bot；Bot 同時支援繁中/英文 inline button 精靈與 slash commands，採 long polling。
+- Telegram 最高管理員由環境變數提供一個或多個 numeric user ID；未列入名單的 Telegram 使用者不得操作管理功能。
+- Bot 預設語言依 Telegram `language_code` 判斷：`zh*` 使用繁體中文，其餘使用英文；每位管理員可切換並保存偏好。
+- Bot 提供完整管理集：子帳號建立、列表、啟用、停權、刪除、重設長期密碼、調整裝置上限、撤銷單一或全部 session；S3/SQL 連線新增、測試、編輯、停用、刪除；權限指派與稽核查詢。
+- 子帳號密碼由 Bot 產生高強度長期密碼並只顯示一次；管理員可重設，服務端只保存 scrypt password hash，不保存明文。
+- S3/SQL 連線憑證由最高管理員透過 Bot 私聊精靈輸入；Bot 盡力刪除敏感訊息，服務端以環境主金鑰 AES-256-GCM 加密後保存 SQLite。文件必須說明 Telegram 平台仍曾接收該訊息。
+- 服務端使用 Node 22 內建 `node:sqlite`，最低支援 Node 22.13；schema 使用版本化 transaction migration，啟動失敗時不得帶著半完成 schema 繼續服務。
+- 部署設定使用環境變數並提供 `.env.example`；至少包含 Bot token、Telegram 管理員 IDs、32-byte 主金鑰、SQLite 路徑、listen host/port、trusted proxy、token TTL 與代理限制。
+- 身分 API 以反向代理終止 HTTPS 為正式部署方式；loopback 可使用 HTTP，非 loopback 的純 HTTP 登入預設拒絕。trusted proxy 必須明確設定，不得無條件信任所有 forwarded headers。
+- Go GUI 新增第三種進入方式「登入校驗」：在既有本機設定/登入畫面增加入口，不取代本機 Vault；遠端登出後回原本畫面。
+- 登入校驗只要求服務端完整 HTTP/HTTPS base URL、帳號與密碼。URL 與帳號保存為非敏感偏好；密碼永不保存。
+- 登入成功後使用 15 分鐘短期 opaque access token 與 30 天 rotation refresh token；refresh token 使用 Windows DPAPI 保存，服務端資料庫只保存 token hash並偵測 refresh reuse。
+- 每個子帳號可同時登入的裝置數由管理員調整，預設 3 台；每台裝置有獨立 session，可撤銷單一裝置或全部 session。
+- 遠端登入使用獨立工作區，只顯示管理員指派的 S3/SQL 連線與允許操作，不顯示 SSH，不允許客戶端新增、修改或取得遠端連線密鑰。
+- Node 服務端代理所有 S3/SQL 操作，Go 客戶端不得取得 S3 access key、secret key、SQL user 或 password；子帳號停權或 session 撤銷後必須立即失去代理存取能力。
+- 權限粒度為「connection + operation」：S3 `read/write/delete`，SQL `tables/query/exec`。S3 connection 固定 bucket 與可選 base prefix；SQL connection 固定 database，帳號不得越過 connection 邊界。
+- SQL `query` 在 read-only transaction 中執行並受 timeout/row limit 保護；`exec` 才允許具副作用的 SQL。S3 upload/download 以串流代理並受 byte limit 保護。
+- 所有代理限制可由環境變數調整，預設採保守值：SQL 30 秒、最多 1000 rows、S3 單次 100 MiB、登入/API rate limit、稽核保留 90 天。
+- 稽核只保存安全 metadata：時間、帳號、裝置/IP、操作、connection、成功/失敗、耗時、rows/bytes；SQL 只保存 statement hash/類型，不保存完整 SQL，S3 不保存物件內容。
 
 ## 實作決策
 
@@ -49,6 +69,17 @@
 - CI 的 i18n 測試由 GitHub Actions 執行；本機驗證僅使用不啟動 i18n 測試執行檔的格式化、靜態分析、建置與依賴檢查。
 - README 的設定值必須以目前 `config.S3Profile`、`config.DBProfile`、S3 client 與 SQL DSN 實作為準，不記載 GUI 或 backend 尚未支援的選項。
 - 文件必須區分 vault backend 與工作區 profile：前者保存加密 vault 密文，後者提供登入後的物件與資料庫操作；同一組遠端服務可使用不同 bucket、database 或最小權限帳號。
+- 新服務採模組化單體，不拆微服務；domain/application 層不依賴 Fastify、grammY、SQLite、AWS 或 SQL driver，外部 adapter 透過介面注入。
+- Fastify v5 route 使用完整 JSON Schema 驗證，API 固定在 `/api/v1`；測試使用 `fastify.inject`，不得依賴真實網路 port。
+- Bot 僅接受私聊管理操作；按鈕與 slash commands 共用同一 application service，不各自複製權限與驗證邏輯。
+- 密碼使用 Node 內建 `crypto.scrypt` 與 random salt；連線 secret 使用 random nonce AES-256-GCM；access/refresh token 使用 CSPRNG opaque token，資料庫只保存 SHA-256 hash。
+- refresh token 每次使用即輪換；重用已輪換 token 時撤銷該 token family。密碼重設、帳號停權或刪除會撤銷所有 session。
+- SQLite repository 使用 prepared statements、foreign keys、WAL 與明確 transaction；自動 migration 由 `schema_migrations` 追蹤版本。
+- Go 端新增 remote-auth API client 與 session/resource 介面；Gio presentation 不直接組 HTTP request，現有本機 `app.Session` 行為保持不變。
+- Go remote refresh token 與 device secret 使用既有 `securestore.Store`/Windows DPAPI；非敏感 server URL、account 與 device ID 使用獨立版本化偏好，不寫入現有 vault metadata。
+- Bot/API/Go remote UI 的應用文案提供英文與繁體中文；外部 S3/SQL 原始診斷依既有原則保留原文。
+- S3 adapter 使用 AWS SDK v3；SQL adapter 使用 `mysql2` 與 `pg`。Node package build 後以 `node dist/index.js` 啟動，測試使用 Node 內建 test runner。
+- CI 新增 Node 22 job，執行 `npm ci`、format/lint、typecheck、test、build 與 production dependency audit；既有 Go CI 保留。
 
 ## 驗收標準
 
@@ -67,9 +98,26 @@
 - GitHub `main` 分支存在且遠端工作樹乾淨；CI 與 Release workflow 已提交並可由 GitHub Actions 觸發。
 - README 可讓使用者依欄位表完成 R2、AWS S3、MinIO、MySQL 與 PostgreSQL 設定，並能判斷何時啟用 path-style、MySQL TLS mode 與 PostgreSQL SSL mode。
 - README 明確說明 bootstrap secret 由 Windows DPAPI 保存、工作區 profile 進入遠端加密 vault，且範例不得包含真實憑證。
+- `npm --prefix server run build` 可在 Node.js 22.13+ 完成，`npm --prefix server start` 可啟動 REST API 與 Telegram long polling；缺少必要環境變數時需明確失敗。
+- 自動 migration 可從空 SQLite 建立 schema，重複啟動冪等；migration 中途失敗不得留下部分版本。
+- 非 Telegram 管理員、群組訊息及偽造 callback 不可執行管理操作；繁中/英文按鈕與 slash commands 呼叫相同權限檢查。
+- Bot 可完成子帳號與 S3/MySQL/PostgreSQL connection 全生命週期、連線測試、權限指派、session 撤銷及安全 metadata 稽核查詢。
+- SQLite、log、Bot 回覆、API response 與稽核紀錄不得包含明文 S3/SQL secret、帳號密碼、access token 或 refresh token。
+- `/api/v1/auth/login`、refresh、logout 與 password/reset 相關流程具 rate limit、constant-time secret comparison、裝置上限、停權及 refresh reuse 測試。
+- 未授權 connection/operation、停權帳號、停用 connection、過期或撤銷 token均回明確 401/403/404，不得觸發後端 S3/SQL 呼叫。
+- S3 proxy 的 list/upload/download/delete 尊重 base prefix、operation permission、100 MiB 預設限制與 context cancellation；不得把 remote credential 回傳客戶端。
+- SQL proxy 的 tables/query/exec 尊重 database connection 與 operation permission；query 預設 read-only、30 秒、1000 rows，exec 需獨立權限。
+- Go GUI 在本機 setup/login 畫面可進入「登入校驗」，能以 URL/帳密登入、處理長期密碼、載入 assigned resources、操作 S3/SQL、refresh、登出及被撤銷狀態。
+- Go remote 模式不顯示 SSH、不允許編輯 connection secret；URL/account 可保存，refresh token 只存在 DPAPI，密碼不落盤。
+- Node 與 Go 新增行為皆依 RED -> GREEN -> REFACTOR 建立測試；GitHub CI 的 Go 與 Node jobs、vet/typecheck/build、安全掃描均通過。
 
 ## 不在本次範圍
 
 - 不建立獨立遠端帳號服務；vault backend 只提供密文儲存。
 - 不做 R2 與 SQL 雙寫同步或衝突合併。
 - 不保證 Linux/macOS 的安全儲存與 GUI 發行流程。
+- 不提供瀏覽器管理後台；管理入口為 Telegram Bot，資料操作入口為 Go 桌面客戶端。
+- 不下發 S3/SQL 原始憑證，不支援客戶端繞過服務端直接連線。
+- 不支援 SSH 代理、R2/SQL vault 同步或將既有本機 vault 搬移到帳號服務。
+- 不提供多實例 Node 服務、外部 Redis session、PostgreSQL 作服務自身資料庫或高可用叢集。
+- 不保存完整 SQL、S3 object body 或其他業務資料到稽核紀錄。
