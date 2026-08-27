@@ -143,6 +143,33 @@ const (
 	KeyS3Bootstrap       Key = "s3_bootstrap_required"
 	KeySQLBootstrap      Key = "sql_bootstrap_required"
 	KeyRecoveryRequired  Key = "recovery_credentials_required"
+	KeyRemoteEntry       Key = "remote_entry"
+	KeyRemoteTitle       Key = "remote_title"
+	KeyRemoteDescription Key = "remote_description"
+	KeyRemoteURL         Key = "remote_url"
+	KeyAccount           Key = "account"
+	KeyRemoteSignIn      Key = "remote_sign_in"
+	KeyRemoteRestore     Key = "remote_restore"
+	KeyBack              Key = "back"
+	KeyRemoteWorkspace   Key = "remote_workspace"
+	KeyAssigned          Key = "assigned_connections"
+	KeyNoAssigned        Key = "no_assigned_connections"
+	KeyRemoteRequired    Key = "remote_credentials_required"
+	KeyStatusRemoteLogin Key = "status_remote_login"
+	KeyStatusRemoteLoad  Key = "status_remote_load"
+	KeyRemoteForbidden   Key = "remote_forbidden"
+	KeyRemoteUnselected  Key = "remote_unselected"
+	KeyRemoteReady       Key = "remote_ready"
+	KeyRemoteHint        Key = "remote_hint"
+	KeyAssignedStorage   Key = "assigned_storage"
+	KeyAssignedDatabase  Key = "assigned_database"
+	KeyRemoteObjectOut   Key = "remote_object_output"
+	KeyRemoteDatabaseOut Key = "remote_database_output"
+	KeyRemoteAccount     Key = "remote_account"
+	KeyRemoteUnavailable Key = "remote_unavailable"
+	KeyStatusRemoteList  Key = "status_remote_resource_list"
+	KeyStatusRemoteS3    Key = "status_remote_s3_list"
+	KeyUploaded          Key = "uploaded"
 )
 
 var translations = map[Language]map[Key]string{
@@ -156,10 +183,10 @@ var translations = map[Language]map[Key]string{
 
 var extraTranslations = map[Language]map[Key]string{
 	English: {
-		KeySSHRequired: "SSH name, host, and user are required", KeySSHAuthRequired: "SSH password or key path is required", KeyStorageRequired: "storage name, endpoint, access key, secret key, and bucket are required", KeyDatabaseRequired: "database name, type, host, user, password, and database are required", KeyPortInvalid: "port must be between 1 and 65535", KeyOperationFailed: "Operation failed.", KeyDownloaded: "Downloaded ", KeyRowsAffected: "Rows affected: ", KeyPreview: " (preview available in output)", KeyCreateHint: "Create a vault to get started.", KeyBytes: "Bytes", KeyLastInsertID: "Last insert ID: ", KeyRecoverySaved: "Save this recovery key before continuing.", KeyStatusRotating: "Rotating recovery credentials...", KeyStatusConnecting: "Connecting to SSH host...", KeySSHProfiles: "SSH profiles", KeyStorageProfiles: "Storage profiles", KeyDatabaseProfiles: "Database profiles", KeyNew: "New", KeyName: "Name", KeyKeyPath: "Key path", KeyKeyPassphrase: "Key passphrase", KeyHostFingerprint: "Host fingerprint", KeyVaultBucket: "Vault bucket", KeyDownloadedTo: " to ", KeyPreferenceSave: "Could not save language preference: ", KeyVaultRequired: "vault name and password are required", KeyS3Bootstrap: "S3 endpoint, bucket, access key, and secret key are required", KeySQLBootstrap: "SQL type, host, port, user, password, and database are required", KeyRecoveryRequired: "recovery key, new vault name, and new vault password are required",
+		KeySSHRequired: "SSH name, host, and user are required", KeySSHAuthRequired: "SSH password or key path is required", KeyStorageRequired: "storage name, endpoint, access key, secret key, and bucket are required", KeyDatabaseRequired: "database name, type, host, user, password, and database are required", KeyPortInvalid: "port must be between 1 and 65535", KeyOperationFailed: "Operation failed.", KeyDownloaded: "Downloaded ", KeyRowsAffected: "Rows affected: ", KeyPreview: " (preview available in output)", KeyCreateHint: "Create a vault to get started.", KeyBytes: "Bytes", KeyLastInsertID: "Last insert ID: ", KeyRecoverySaved: "Save this recovery key before continuing.", KeyStatusRotating: "Rotating recovery credentials...", KeyStatusConnecting: "Connecting to SSH host...", KeySSHProfiles: "SSH profiles", KeyStorageProfiles: "Storage profiles", KeyDatabaseProfiles: "Database profiles", KeyNew: "New", KeyName: "Name", KeyKeyPath: "Key path", KeyKeyPassphrase: "Key passphrase", KeyHostFingerprint: "Host fingerprint", KeyVaultBucket: "Vault bucket", KeyDownloadedTo: " to ", KeyPreferenceSave: "Could not save language preference: ", KeyVaultRequired: "vault name and password are required", KeyS3Bootstrap: "S3 endpoint, bucket, access key, and secret key are required", KeySQLBootstrap: "SQL type, host, port, user, password, and database are required", KeyRecoveryRequired: "recovery key, new vault name, and new vault password are required", KeyRemoteEntry: "Remote sign in", KeyRemoteTitle: "Sign in with authentication service", KeyRemoteDescription: "Use a complete HTTP or HTTPS URL. The password is never saved.", KeyRemoteURL: "Authentication service URL", KeyAccount: "Account", KeyRemoteSignIn: "Sign in remotely", KeyRemoteRestore: "Restore saved session", KeyBack: "Back", KeyRemoteWorkspace: "Remote workspace", KeyAssigned: "Assigned connections", KeyNoAssigned: "No assigned connections.", KeyRemoteRequired: "Remote sign-in URL, account, and password are required", KeyStatusRemoteLogin: "Signing in to authentication service...", KeyStatusRemoteLoad: "Restoring remote session...", KeyRemoteForbidden: "Permission not granted for this operation", KeyRemoteUnselected: "No connection selected", KeyRemoteReady: "Remote workspace ready.", KeyRemoteHint: "Sign in to the remote authentication service.", KeyAssignedStorage: "Assigned S3 / R2", KeyAssignedDatabase: "Assigned SQL database", KeyRemoteObjectOut: "Remote objects and operation output", KeyRemoteDatabaseOut: "Remote database output", KeyRemoteAccount: "Remote account: ", KeyRemoteUnavailable: "Remote authentication service is unavailable", KeyStatusRemoteList: "Loading assigned connections...", KeyStatusRemoteS3: "Listing remote objects...", KeyUploaded: "Uploaded ",
 	},
 	TraditionalChinese: {
-		KeySSHRequired: "SSH 名稱、主機與使用者為必填", KeySSHAuthRequired: "SSH 密碼或 Key 路徑為必填", KeyStorageRequired: "儲存名稱、端點、Access Key、Secret Key 與 Bucket 為必填", KeyDatabaseRequired: "資料庫名稱、類型、主機、使用者、密碼與資料庫為必填", KeyPortInvalid: "連接埠必須介於 1 到 65535", KeyOperationFailed: "操作失敗。", KeyDownloaded: "已下載 ", KeyRowsAffected: "受影響資料列：", KeyPreview: "（輸出區可查看預覽）", KeyCreateHint: "建立 Vault 以開始使用。", KeyBytes: "位元組", KeyLastInsertID: "最後寫入 ID：", KeyRecoverySaved: "繼續前請保存復原金鑰。", KeyStatusRotating: "正在輪換復原憑證...", KeyStatusConnecting: "正在連線至 SSH 主機...", KeySSHProfiles: "SSH Profiles", KeyStorageProfiles: "儲存 Profiles", KeyDatabaseProfiles: "資料庫 Profiles", KeyNew: "新增", KeyName: "名稱", KeyKeyPath: "Key 路徑", KeyKeyPassphrase: "Key 密語", KeyHostFingerprint: "主機指紋", KeyVaultBucket: "Vault Bucket", KeyDownloadedTo: " 至 ", KeyPreferenceSave: "無法保存語言偏好：", KeyVaultRequired: "Vault 名稱與密碼為必填", KeyS3Bootstrap: "S3 端點、Bucket、Access Key 與 Secret Key 為必填", KeySQLBootstrap: "SQL 類型、主機、連接埠、使用者、密碼與資料庫為必填", KeyRecoveryRequired: "復原金鑰、新 Vault 名稱與新 Vault 密碼為必填",
+		KeySSHRequired: "SSH 名稱、主機與使用者為必填", KeySSHAuthRequired: "SSH 密碼或 Key 路徑為必填", KeyStorageRequired: "儲存名稱、端點、Access Key、Secret Key 與 Bucket 為必填", KeyDatabaseRequired: "資料庫名稱、類型、主機、使用者、密碼與資料庫為必填", KeyPortInvalid: "連接埠必須介於 1 到 65535", KeyOperationFailed: "操作失敗。", KeyDownloaded: "已下載 ", KeyRowsAffected: "受影響資料列：", KeyPreview: "（輸出區可查看預覽）", KeyCreateHint: "建立 Vault 以開始使用。", KeyBytes: "位元組", KeyLastInsertID: "最後寫入 ID：", KeyRecoverySaved: "繼續前請保存復原金鑰。", KeyStatusRotating: "正在輪換復原憑證...", KeyStatusConnecting: "正在連線至 SSH 主機...", KeySSHProfiles: "SSH Profiles", KeyStorageProfiles: "儲存 Profiles", KeyDatabaseProfiles: "資料庫 Profiles", KeyNew: "新增", KeyName: "名稱", KeyKeyPath: "Key 路徑", KeyKeyPassphrase: "Key 密語", KeyHostFingerprint: "主機指紋", KeyVaultBucket: "Vault Bucket", KeyDownloadedTo: " 至 ", KeyPreferenceSave: "無法保存語言偏好：", KeyVaultRequired: "Vault 名稱與密碼為必填", KeyS3Bootstrap: "S3 端點、Bucket、Access Key 與 Secret Key 為必填", KeySQLBootstrap: "SQL 類型、主機、連接埠、使用者、密碼與資料庫為必填", KeyRecoveryRequired: "復原金鑰、新 Vault 名稱與新 Vault 密碼為必填", KeyRemoteEntry: "遠端登入", KeyRemoteTitle: "使用身分驗證服務登入", KeyRemoteDescription: "請輸入完整的 HTTP 或 HTTPS URL。密碼永遠不會保存。", KeyRemoteURL: "身分驗證服務 URL", KeyAccount: "帳號", KeyRemoteSignIn: "登入遠端服務", KeyRemoteRestore: "還原已保存的 Session", KeyBack: "返回", KeyRemoteWorkspace: "遠端工作區", KeyAssigned: "已指派連線", KeyNoAssigned: "沒有已指派的連線。", KeyRemoteRequired: "遠端登入 URL、帳號與密碼為必填", KeyStatusRemoteLogin: "正在登入身分驗證服務...", KeyStatusRemoteLoad: "正在還原遠端 Session...", KeyRemoteForbidden: "未授予此操作的權限", KeyRemoteUnselected: "尚未選擇連線", KeyRemoteReady: "遠端工作區已就緒。", KeyRemoteHint: "登入遠端身分驗證服務。", KeyAssignedStorage: "已指派 S3 / R2", KeyAssignedDatabase: "已指派 SQL 資料庫", KeyRemoteObjectOut: "遠端物件與操作輸出", KeyRemoteDatabaseOut: "遠端資料庫輸出", KeyRemoteAccount: "遠端帳號：", KeyRemoteUnavailable: "遠端身分驗證服務無法使用", KeyStatusRemoteList: "正在載入已指派連線...", KeyStatusRemoteS3: "正在列出遠端物件...", KeyUploaded: "已上傳 ",
 	},
 }
 

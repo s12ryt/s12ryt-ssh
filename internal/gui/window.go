@@ -15,6 +15,7 @@ import (
 	"s12ryt-ssh/internal/config"
 	"s12ryt-ssh/internal/database"
 	"s12ryt-ssh/internal/i18n"
+	"s12ryt-ssh/internal/remote"
 	sshclient "s12ryt-ssh/internal/ssh"
 	"s12ryt-ssh/internal/storage"
 
@@ -87,6 +88,19 @@ type Window struct {
 	storageTab  widget.Clickable
 	databaseTab widget.Clickable
 	logout      widget.Clickable
+	remoteEntry widget.Clickable
+
+	remoteURL      widget.Editor
+	remoteUsername widget.Editor
+	remotePassword widget.Editor
+	remoteLogin    widget.Clickable
+	remoteRestore  widget.Clickable
+	remoteBack     widget.Clickable
+	remoteRefresh  widget.Clickable
+
+	remoteResources       []remote.Resource
+	remoteResourceButtons []widget.Clickable
+	remoteIndex           int
 
 	sshNew            widget.Clickable
 	sshSave           widget.Clickable
@@ -159,9 +173,10 @@ type Window struct {
 }
 
 type asyncEvent struct {
-	apply  func()
-	err    error
-	status string
+	apply       func()
+	applyAlways bool
+	err         error
+	status      string
 }
 
 // NewWindow creates a Gio application window controller.
@@ -171,6 +186,11 @@ func NewWindow(service *coreapp.Service) *Window {
 
 // NewWindowWithPreferences creates a window and loads its non-sensitive language preference.
 func NewWindowWithPreferences(service *coreapp.Service, preferencesPath string) *Window {
+	return NewWindowWithServices(service, nil, preferencesPath)
+}
+
+// NewWindowWithServices creates a window with local and optional remote authentication services.
+func NewWindowWithServices(service *coreapp.Service, remoteService *remote.Service, preferencesPath string) *Window {
 	th := material.NewTheme()
 	th.Palette.Bg = colorBackground
 	th.Palette.Fg = colorText
@@ -183,17 +203,25 @@ func NewWindowWithPreferences(service *coreapp.Service, preferencesPath string) 
 			language = prefs.Language
 		}
 	}
-	return &Window{
-		model:           NewModel(service),
+	ui := &Window{
+		model:           NewModelWithRemote(service, remoteService),
 		theme:           th,
 		setupBackend:    "s3",
 		sshIndex:        -1,
 		storageIndex:    -1,
 		databaseIndex:   -1,
+		remoteIndex:     -1,
 		events:          make(chan asyncEvent, 8),
 		language:        language,
 		preferencesPath: preferencesPath,
 	}
+	if remoteService != nil {
+		if prefs, err := remoteService.Preferences(); err == nil {
+			ui.remoteURL.SetText(prefs.BaseURL)
+			ui.remoteUsername.SetText(prefs.Username)
+		}
+	}
+	return ui
 }
 
 func (ui *Window) text(source string) string { return i18n.Text(ui.language, source) }
@@ -240,7 +268,17 @@ func (ui *Window) Close() error {
 		return nil
 	}
 	ui.closeSSH()
-	return ui.model.Logout()
+	var remoteErr error
+	if ui.model.RemoteSession != nil {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		remoteErr = ui.model.LogoutRemote(ctx)
+		cancel()
+	}
+	localErr := ui.model.Logout()
+	if remoteErr != nil {
+		return remoteErr
+	}
+	return localErr
 }
 
 func (ui *Window) closeSSH() {
@@ -264,13 +302,13 @@ func (ui *Window) pump() {
 		select {
 		case event := <-ui.events:
 			ui.busy = false
+			if event.apply != nil && (event.err == nil || event.applyAlways) {
+				event.apply()
+			}
 			if event.err != nil {
 				ui.model.Error = event.err.Error()
 				ui.model.Status = "Operation failed."
 			} else {
-				if event.apply != nil {
-					event.apply()
-				}
 				ui.model.Error = ""
 				if event.status != "" {
 					ui.model.Status = event.status
@@ -280,6 +318,24 @@ func (ui *Window) pump() {
 			return
 		}
 	}
+}
+
+func (ui *Window) asyncAlways(status string, work func(context.Context) (func(), error)) {
+	if ui.busy {
+		return
+	}
+	ui.busy = true
+	ui.model.Status = status
+	ui.model.Error = ""
+	go func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+		defer cancel()
+		apply, err := work(ctx)
+		ui.events <- asyncEvent{apply: apply, applyAlways: true, err: err, status: "Ready."}
+		if ui.window != nil {
+			ui.window.Invalidate()
+		}
+	}()
 }
 
 func (ui *Window) async(status string, work func(context.Context) (func(), error)) {
@@ -313,10 +369,18 @@ func (ui *Window) handle(gtx layout.Context) {
 		ui.handleRecovery(gtx)
 	case ScreenWorkspace:
 		ui.handleWorkspace(gtx)
+	case ScreenRemoteLogin:
+		ui.handleRemoteLogin(gtx)
+	case ScreenRemoteWorkspace:
+		ui.handleRemoteWorkspace(gtx)
 	}
 }
 
 func (ui *Window) handleSetup(gtx layout.Context) {
+	if ui.remoteEntry.Clicked(gtx) {
+		ui.model.BeginRemoteLogin()
+		return
+	}
 	if ui.setupS3Button.Clicked(gtx) {
 		ui.setupBackend = "s3"
 	}
@@ -359,6 +423,10 @@ func (ui *Window) handleSetup(gtx layout.Context) {
 }
 
 func (ui *Window) handleLogin(gtx layout.Context) {
+	if ui.remoteEntry.Clicked(gtx) {
+		ui.model.BeginRemoteLogin()
+		return
+	}
 	if ui.loginRecovery.Clicked(gtx) {
 		ui.model.BeginRecovery()
 		ui.recoveryKey.SetText("")
@@ -689,7 +757,7 @@ func (ui *Window) header(gtx layout.Context) layout.Dimensions {
 			return ui.button(gtx, &ui.languageButton, i18n.T(ui.language, i18n.KeyLanguageToggle), false)
 		}),
 		layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-			if ui.model.Screen == ScreenWorkspace {
+			if ui.model.Screen == ScreenWorkspace || ui.model.Screen == ScreenRemoteWorkspace {
 				return ui.button(gtx, &ui.logout, ui.text("Log out"), false)
 			}
 			return layout.Dimensions{}
@@ -707,6 +775,10 @@ func (ui *Window) content(gtx layout.Context) layout.Dimensions {
 		return ui.recoveryView(gtx)
 	case ScreenWorkspace:
 		return ui.workspaceView(gtx)
+	case ScreenRemoteLogin:
+		return ui.remoteLoginView(gtx)
+	case ScreenRemoteWorkspace:
+		return ui.remoteWorkspaceView(gtx)
 	default:
 		return layout.Dimensions{}
 	}
@@ -747,6 +819,9 @@ func (ui *Window) setupView(gtx layout.Context) layout.Dimensions {
 							}),
 						)
 					}),
+					layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+						return ui.button(gtx, &ui.remoteEntry, "Remote sign in", false)
+					}),
 				)
 			})
 		})
@@ -774,6 +849,9 @@ func (ui *Window) loginView(gtx layout.Context) layout.Dimensions {
 					layout.Rigid(func(gtx layout.Context) layout.Dimensions { return ui.button(gtx, &ui.loginButton, "Sign in", true) }),
 					layout.Rigid(func(gtx layout.Context) layout.Dimensions {
 						return ui.button(gtx, &ui.loginRecovery, "Use recovery key", false)
+					}),
+					layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+						return ui.button(gtx, &ui.remoteEntry, "Remote sign in", false)
 					}),
 				)
 			})
@@ -1099,6 +1177,30 @@ func (ui *Window) downloadedTo(path string) string {
 		return ui.text(" (preview available in output)")
 	}
 	return ui.text(" to ") + path
+}
+
+func (ui *Window) remoteResourceIndices(tab Tab) []int {
+	indices := make([]int, 0, len(ui.remoteResources))
+	for index, resource := range ui.remoteResources {
+		if !resource.Enabled {
+			continue
+		}
+		kind := strings.ToLower(strings.TrimSpace(resource.Kind))
+		if tab == TabStorage && kind == "s3" {
+			indices = append(indices, index)
+		}
+		if tab == TabDatabase && (kind == "mysql" || kind == "postgres" || kind == "postgresql") {
+			indices = append(indices, index)
+		}
+	}
+	return indices
+}
+
+func (ui *Window) remoteAllows(operation remote.Operation) bool {
+	if ui.remoteIndex < 0 || ui.remoteIndex >= len(ui.remoteResources) {
+		return false
+	}
+	return ui.remoteResources[ui.remoteIndex].Enabled && ui.remoteResources[ui.remoteIndex].Allows(operation)
 }
 
 func (ui *Window) secretLabel(gtx layout.Context, text string) layout.Dimensions {
@@ -1553,6 +1655,28 @@ func formatRows(rows []database.Row) string {
 			}
 			first = false
 			fmt.Fprintf(&b, "%s=%v", key, value)
+		}
+		b.WriteByte('\n')
+	}
+	return b.String()
+}
+
+func formatRemoteRows(result remote.SQLQueryResult) string {
+	if len(result.Rows) == 0 {
+		return "No rows returned."
+	}
+	var b strings.Builder
+	for rowIndex, row := range result.Rows {
+		fmt.Fprintf(&b, "%d: ", rowIndex+1)
+		for columnIndex, column := range result.Columns {
+			if columnIndex > 0 {
+				b.WriteString(" | ")
+			}
+			var value any
+			if columnIndex < len(row) {
+				value = row[columnIndex]
+			}
+			fmt.Fprintf(&b, "%s=%v", column, value)
 		}
 		b.WriteByte('\n')
 	}
