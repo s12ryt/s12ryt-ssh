@@ -17,3 +17,13 @@ s12ryt-ssh.exe
 *.swp
 Thumbs.db
 Desktop.ini
+
+# Node authentication server state and build output
+/server/.env
+/server/node_modules/
+/server/dist/
+/server/data/
+/server/**/*.db
+/server/**/*.db-*
+/server/**/*.sqlite
+/server/**/*.sqlite-*
