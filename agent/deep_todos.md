@@ -93,3 +93,6 @@
 - 最終 Go 驗證明確排除本機 `internal/i18n` 測試後，root、app、config、database、gui、remote、securestore、ssh、storage、vault 全數通過；`go vet` 與 `go build` 對同一組專案 package 通過。
 - CI YAML/README 可由 Prettier 解析，`git diff --check` 無 whitespace error，server runtime 資料與 SQLite 檔案可被 `.gitignore` 排除，TUI dependency 與常見憑證 pattern 檢查均無命中。
 - 本機仍未執行 `internal/i18n` package tests；本次未推送，因此 GitHub CI 尚未驗證這批變更；真實 Telegram、S3、MySQL/PostgreSQL 服務整合與最新 Windows GUI linker build亦未執行。
+- 已依 git-master 規則將 60 個變更檔案拆成 27 個英文 plain-style 原子提交，並推送至 `origin/main`，遠端最新提交為 `2c3912f`。
+- GitHub Actions CI run `33036030920` 全部通過：Node 22 format/lint/typecheck/test/build/npm audit、Go 1.25.x/1.26.x test/vet/build、govulncheck、gitleaks secret scan 與 Windows GUI linker build均成功。
+- CI 僅保留 actions/checkout、actions/setup-go 與 gitleaks 的 Node.js 20 deprecation annotation，屬非阻塞工作流程維護事項。

@@ -87,3 +87,6 @@
 - 最終 Go 驗證：未執行本機 `internal/i18n` package test；其餘專案 package 測試全綠，並通過對同一 package 集合的 `go vet`、`go build`。
 - 安全與文件驗證：server source 無 TODO/FIXME/not implemented；常見 AWS/GitHub/Slack/private-key pattern 無命中；`git diff --check` 無 whitespace error；README/CI YAML 可由 Prettier 解析；無舊 TUI 依賴。
 - 本輪未執行 Git commit/push，因此新 Node/Go 功能尚未由 GitHub Actions 驗證；未連線真實 Telegram、S3、MySQL/PostgreSQL，亦未重新產生 Windows GUI linker build。
+- 使用者明確要求推送後，依 git-master 將 60 個檔案拆成 27 個英文 plain-style 原子提交，推送 `main` 至 `origin/main`；推送範圍為 `d5914e8..2c3912f`。
+- 推送前確認工作樹乾淨、27 個提交完整、`server/.env`、SQLite、`node_modules`、`dist` 與 runtime data 未被追蹤，且 `git diff --check origin/main..HEAD` 通過。
+- GitHub Actions run `33036030920` 完整成功：Node 22 server checks、Go 1.25.x/1.26.x checks、govulncheck、secret scan、Windows GUI build全部通過；僅有第三方 actions 的 Node.js 20 deprecation 非阻塞提示。
