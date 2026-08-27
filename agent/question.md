@@ -121,3 +121,31 @@
 - 不支援 SSH 代理、R2/SQL vault 同步或將既有本機 vault 搬移到帳號服務。
 - 不提供多實例 Node 服務、外部 Redis session、PostgreSQL 作服務自身資料庫或高可用叢集。
 - 不保存完整 SQL、S3 object body 或其他業務資料到稽核紀錄。
+
+## 2026-08-27 自主疊代升級：UI 合理性修正（本輪範圍）
+
+使用者確認：修正範圍「全部含視覺級」；破壞性操作採「確認對話框（modal）」；S3 物件列表可點擊自動填入 Object key（本機與遠端）。
+
+### 缺陷級（必修正）
+- 單行 editor 已設定 Submit 但無人消費 SubmitEvent：所有表單按 Enter 無反應。修正：登入、遠端登入、建立 vault、復原輪換、SSH 連線與終端輸入支援 Enter 送出；動作抽成可測試方法與按鈕共用。
+- 終端/輸出區以 MaxLines 靜態文字顯示、不可滾動：終端超過 100 行後看不到新輸出。修正：改為可滾動列表、終端貼底跟隨、緩衝上限避免無限成長。
+- `ui.list` 被設定表單、本機側欄、遠端側欄三處共用造成滾動位置跨畫面污染。修正：各視圖獨立 list。
+- busy 期間按鈕外觀不變、點擊被靜默忽略。修正：busy 時按鈕視覺禁用（灰）；語言切換、SSH Close（取消連線）與 modal 按鈕保持可用；本機登出在 busy 時由禁用涵蓋競爭問題。
+- 錯誤訊息截斷 4 行。修正：完整換行顯示。
+
+### UX 準則級
+- S3 Delete 與 SQL Exec（本機+遠端）以遮罩式確認對話框二次確認；確認接受鍵與 Delete/Exec 按鈕採危險色樣式；物件 key 與 SQL 敘述空白時先回驗證錯誤。
+- busy 時狀態列顯示 indeterminate 進度條。
+- DB Type 由自由文字改為 MySQL/PostgreSQL 選擇按鈕；載入既有 profile 時 postgres/postgresql/pg 正規化為 postgres。
+- 本機 profile 側欄空狀態提示；復原金鑰一鍵複製到剪貼簿。
+
+### 視覺級
+- 終端輸出與 SQL 欄位使用等寬字型（既有依賴 gofont GoMono，零新增依賴）。
+- 密碼欄位提供 Show/Hide 顯示切換。
+- PTY 輸出過濾 ANSI escape 序列與歸位字元，維持基本可讀。
+
+### 驗收標準（本輪）
+- 上述行為均有單元測試先 RED 後 GREEN；渲染層接線以 build + 既有 GUI 測試 + 程式碼審查驗證並明列例外。
+- `go test ./internal/gui` 及其他本機可跑套件全綠；`go vet ./...`、`go build ./...`、`gofmt` 通過；本機不執行 `internal/i18n` 測試（防毒限制），i18n 新 key 交付 CI 驗證。
+- 新增 UI 字串均加入英/繁字典；外部服務原始錯誤保持原文。
+- 不改動本機 Vault / 遠端服務的公開行為契約；不 commit/push（未獲指示）。
