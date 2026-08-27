@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"image"
 	"image/color"
+	"io"
+	"math"
 	"os"
 	"strconv"
 	"strings"
@@ -20,10 +22,13 @@ import (
 	"s12ryt-ssh/internal/storage"
 
 	"gioui.org/app"
+	"gioui.org/font/gofont"
+	"gioui.org/io/clipboard"
 	"gioui.org/layout"
 	"gioui.org/op"
 	"gioui.org/op/clip"
 	"gioui.org/op/paint"
+	"gioui.org/text"
 	"gioui.org/unit"
 	"gioui.org/widget"
 	"gioui.org/widget/material"
@@ -41,36 +46,46 @@ var (
 
 // Window is the Gio presentation layer for the application.
 type Window struct {
-	model           *Model
-	window          *app.Window
-	theme           *material.Theme
-	ops             op.Ops
-	list            layout.List
-	language        i18n.Language
-	preferencesPath string
-	languageButton  widget.Clickable
+	model              *Model
+	window             *app.Window
+	theme              *material.Theme
+	ops                op.Ops
+	setupList          layout.List
+	profileScroll      layout.List
+	remoteList         layout.List
+	terminalList       layout.List
+	storageOutputList  layout.List
+	databaseOutputList layout.List
+	objectList         layout.List
+	remoteObjectList   layout.List
+	language           i18n.Language
+	preferencesPath    string
+	languageButton     widget.Clickable
+	reveals            map[*widget.Editor]*editorReveal
 
-	setupBackend    string
-	setupName       widget.Editor
-	setupPassword   widget.Editor
-	setupS3Endpoint widget.Editor
-	setupS3Region   widget.Editor
-	setupS3Access   widget.Editor
-	setupS3Secret   widget.Editor
-	setupS3Bucket   widget.Editor
-	setupPathButton widget.Clickable
-	setupPathStyle  bool
-	setupDBType     widget.Editor
-	setupDBHost     widget.Editor
-	setupDBPort     widget.Editor
-	setupDBUser     widget.Editor
-	setupDBPassword widget.Editor
-	setupDBDatabase widget.Editor
-	setupDBSSL      widget.Editor
-	setupS3Button   widget.Clickable
-	setupSQLButton  widget.Clickable
-	setupTest       widget.Clickable
-	setupRegister   widget.Clickable
+	setupBackend          string
+	setupName             widget.Editor
+	setupPassword         widget.Editor
+	setupS3Endpoint       widget.Editor
+	setupS3Region         widget.Editor
+	setupS3Access         widget.Editor
+	setupS3Secret         widget.Editor
+	setupS3Bucket         widget.Editor
+	setupPathButton       widget.Clickable
+	setupPathStyle        bool
+	setupDBKind           string
+	setupDBMySQLButton    widget.Clickable
+	setupDBPostgresButton widget.Clickable
+	setupDBHost           widget.Editor
+	setupDBPort           widget.Editor
+	setupDBUser           widget.Editor
+	setupDBPassword       widget.Editor
+	setupDBDatabase       widget.Editor
+	setupDBSSL            widget.Editor
+	setupS3Button         widget.Clickable
+	setupSQLButton        widget.Clickable
+	setupTest             widget.Clickable
+	setupRegister         widget.Clickable
 
 	loginName     widget.Editor
 	loginPassword widget.Editor
@@ -83,6 +98,7 @@ type Window struct {
 	recoverySubmit   widget.Clickable
 	recoveryContinue widget.Clickable
 	recoveryBack     widget.Clickable
+	recoveryCopy     widget.Clickable
 
 	sshTab      widget.Clickable
 	storageTab  widget.Clickable
@@ -119,12 +135,20 @@ type Window struct {
 	sshFingerprint    widget.Editor
 	terminalInput     widget.Editor
 	terminalText      string
-	terminal          *sshclient.Terminal
+	terminal          ptyTerminal
 	ssh               *sshclient.Client
 	terminalCtx       context.Context
 	terminalCancel    context.CancelFunc
 	terminalMu        sync.RWMutex
 	terminalSize      image.Point
+
+	confirm             confirmation
+	confirmAcceptBtn    widget.Clickable
+	confirmCancelBtn    widget.Clickable
+	confirmScrim        widget.Clickable
+	remoteObjects       []remote.S3Object
+	objectButtons       []widget.Clickable
+	remoteObjectButtons []widget.Clickable
 
 	storageNew            widget.Clickable
 	storageSave           widget.Clickable
@@ -157,7 +181,9 @@ type Window struct {
 	databaseProfileButtons []widget.Clickable
 	databaseIndex          int
 	databaseName           widget.Editor
-	databaseType           widget.Editor
+	databaseKind           string
+	databaseMySQLButton    widget.Clickable
+	databasePostgresButton widget.Clickable
 	databaseHost           widget.Editor
 	databasePort           widget.Editor
 	databaseUser           widget.Editor
@@ -192,6 +218,7 @@ func NewWindowWithPreferences(service *coreapp.Service, preferencesPath string) 
 // NewWindowWithServices creates a window with local and optional remote authentication services.
 func NewWindowWithServices(service *coreapp.Service, remoteService *remote.Service, preferencesPath string) *Window {
 	th := material.NewTheme()
+	th.Shaper = text.NewShaper(text.WithCollection(gofont.Collection()))
 	th.Palette.Bg = colorBackground
 	th.Palette.Fg = colorText
 	th.Palette.ContrastBg = colorTeal
@@ -207,6 +234,8 @@ func NewWindowWithServices(service *coreapp.Service, remoteService *remote.Servi
 		model:           NewModelWithRemote(service, remoteService),
 		theme:           th,
 		setupBackend:    "s3",
+		setupDBKind:     dbTypeMySQL,
+		databaseKind:    dbTypeMySQL,
 		sshIndex:        -1,
 		storageIndex:    -1,
 		databaseIndex:   -1,
@@ -360,6 +389,15 @@ func (ui *Window) handle(gtx layout.Context) {
 	if ui.languageButton.Clicked(gtx) {
 		_ = ui.toggleLanguage()
 	}
+	if ui.confirm.active {
+		if ui.confirmScrim.Clicked(gtx) || ui.confirmCancelBtn.Clicked(gtx) {
+			ui.confirm.cancel()
+		}
+		if ui.confirmAcceptBtn.Clicked(gtx) {
+			ui.confirm.accept()
+		}
+		return
+	}
 	switch ui.model.Screen {
 	case ScreenSetup:
 		ui.handleSetup(gtx)
@@ -376,9 +414,42 @@ func (ui *Window) handle(gtx layout.Context) {
 	}
 }
 
+// drainEditors consumes pending editor events and reports whether any of them
+// was a submit. Gio v0.10 delivers editor events through Update; draining them
+// every frame keeps stale presses from leaking into later actions.
+func (ui *Window) drainEditors(gtx layout.Context, editors ...*widget.Editor) bool {
+	submitted := false
+	for _, editor := range editors {
+		events := make([]widget.EditorEvent, 0, 4)
+		for {
+			event, ok := editor.Update(gtx)
+			if !ok {
+				break
+			}
+			events = append(events, event)
+		}
+		if consumeSubmit(events) {
+			submitted = true
+		}
+	}
+	return submitted
+}
+
+// requestConfirm opens the destructive-action modal unless work is in flight.
+func (ui *Window) requestConfirm(title, message string, action func()) {
+	if ui.busy {
+		return
+	}
+	ui.confirm.request(title, message, action)
+}
+
 func (ui *Window) handleSetup(gtx layout.Context) {
 	if ui.remoteEntry.Clicked(gtx) {
 		ui.model.BeginRemoteLogin()
+		return
+	}
+	if ui.drainEditors(gtx, &ui.setupName, &ui.setupPassword, &ui.setupS3Endpoint, &ui.setupS3Region, &ui.setupS3Access, &ui.setupS3Secret, &ui.setupS3Bucket, &ui.setupDBHost, &ui.setupDBPort, &ui.setupDBUser, &ui.setupDBPassword, &ui.setupDBDatabase, &ui.setupDBSSL) {
+		ui.tryCreateVault()
 		return
 	}
 	if ui.setupS3Button.Clicked(gtx) {
@@ -389,6 +460,12 @@ func (ui *Window) handleSetup(gtx layout.Context) {
 	}
 	if ui.setupPathButton.Clicked(gtx) {
 		ui.setupPathStyle = !ui.setupPathStyle
+	}
+	if ui.setupDBMySQLButton.Clicked(gtx) {
+		ui.setupDBKind = dbTypeMySQL
+	}
+	if ui.setupDBPostgresButton.Clicked(gtx) {
+		ui.setupDBKind = dbTypePostgres
 	}
 	if ui.setupTest.Clicked(gtx) {
 		bootstrap, err := ui.setupBootstrap()
@@ -401,30 +478,17 @@ func (ui *Window) handleSetup(gtx layout.Context) {
 		})
 	}
 	if ui.setupRegister.Clicked(gtx) {
-		name, password := strings.TrimSpace(ui.setupName.Text()), ui.setupPassword.Text()
-		if err := validateVaultCredentials(name, password); err != nil {
-			ui.model.Error = err.Error()
-			return
-		}
-		bootstrap, err := ui.setupBootstrap()
-		if err != nil {
-			ui.model.Error = err.Error()
-			return
-		}
-		service := ui.model.Service
-		ui.async("Creating encrypted vault...", func(ctx context.Context) (func(), error) {
-			registration, err := service.Register(ctx, bootstrap, name, password, &config.Store{})
-			if err != nil {
-				return nil, err
-			}
-			return func() { ui.model.SetRegistration(registration) }, nil
-		})
+		ui.tryCreateVault()
 	}
 }
 
 func (ui *Window) handleLogin(gtx layout.Context) {
 	if ui.remoteEntry.Clicked(gtx) {
 		ui.model.BeginRemoteLogin()
+		return
+	}
+	if ui.drainEditors(gtx, &ui.loginName, &ui.loginPassword) {
+		ui.trySignIn()
 		return
 	}
 	if ui.loginRecovery.Clicked(gtx) {
@@ -434,22 +498,7 @@ func (ui *Window) handleLogin(gtx layout.Context) {
 		ui.recoveryPassword.SetText("")
 	}
 	if ui.loginButton.Clicked(gtx) {
-		name, password := strings.TrimSpace(ui.loginName.Text()), ui.loginPassword.Text()
-		if err := validateLoginCredentials(name, password); err != nil {
-			ui.model.Error = err.Error()
-			return
-		}
-		service := ui.model.Service
-		ui.async("Unlocking encrypted vault...", func(ctx context.Context) (func(), error) {
-			session, err := service.Login(ctx, name, password)
-			if err != nil {
-				return nil, err
-			}
-			return func() {
-				ui.model.SetSession(session)
-				ui.refreshProfiles()
-			}, nil
-		})
+		ui.trySignIn()
 	}
 }
 
@@ -462,25 +511,25 @@ func (ui *Window) handleRecovery(gtx layout.Context) {
 		ui.model.ContinueFromRecovery()
 		return
 	}
-	if ui.recoverySubmit.Clicked(gtx) && ui.model.RecoveryKey == "" {
-		key, name, password := strings.TrimSpace(ui.recoveryKey.Text()), strings.TrimSpace(ui.recoveryName.Text()), ui.recoveryPassword.Text()
-		if err := validateRecoveryCredentials(key, name, password); err != nil {
-			ui.model.Error = err.Error()
-			return
-		}
-		service := ui.model.Service
-		ui.async("Rotating recovery credentials...", func(ctx context.Context) (func(), error) {
-			registration, err := service.Recover(ctx, key, name, password)
-			if err != nil {
-				return nil, err
-			}
-			return func() { ui.model.SetRegistration(registration) }, nil
+	if ui.recoveryCopy.Clicked(gtx) && ui.model.RecoveryKey != "" {
+		gtx.Execute(clipboard.WriteCmd{
+			Type: "text/plain",
+			Data: io.NopCloser(strings.NewReader(ui.model.RecoveryKey)),
 		})
+		ui.model.Status = "Recovery key copied to clipboard."
+		return
+	}
+	if ui.recoverySubmit.Clicked(gtx) && ui.model.RecoveryKey == "" {
+		ui.tryRotateRecovery()
+		return
+	}
+	if ui.model.RecoveryKey == "" && ui.drainEditors(gtx, &ui.recoveryKey, &ui.recoveryName, &ui.recoveryPassword) {
+		ui.tryRotateRecovery()
 	}
 }
 
 func (ui *Window) handleWorkspace(gtx layout.Context) {
-	if ui.logout.Clicked(gtx) {
+	if ui.logout.Clicked(gtx) && !ui.busy {
 		_ = ui.Close()
 		return
 	}
@@ -523,64 +572,18 @@ func (ui *Window) handleSSH(gtx layout.Context) {
 		ui.saveProfile(func(profiles *config.Store) { profiles.SSH = replaceSSH(profiles.SSH, ui.sshIndex, profile) }, func() { ui.sshIndex = 0 })
 	}
 	if ui.sshConnect.Clicked(gtx) {
-		if ui.busy {
-			return
-		}
-		profile, err := ui.sshProfile()
-		if err != nil {
-			ui.model.Error = err.Error()
-			return
-		}
-		ui.closeSSH()
-		terminalCtx, terminalCancel := context.WithCancel(context.Background())
-		ui.terminalCtx = terminalCtx
-		ui.terminalCancel = terminalCancel
-		ui.async("Connecting to SSH host...", func(ctx context.Context) (func(), error) {
-			client := sshclient.NewClient(profile)
-			client.SetTimeout(20 * time.Second)
-			if err := client.Connect(); err != nil {
-				terminalCancel()
-				_ = client.Close()
-				return nil, err
-			}
-			terminal, err := client.OpenPTY(terminalCtx, 100, 30)
-			if err != nil {
-				terminalCancel()
-				_ = client.Close()
-				return nil, err
-			}
-			if err := terminalCtx.Err(); err != nil {
-				_ = terminal.Close()
-				_ = client.Close()
-				return nil, err
-			}
-			return func() {
-				if ui.terminalCtx != terminalCtx || terminalCtx.Err() != nil {
-					_ = terminal.Close()
-					_ = client.Close()
-					return
-				}
-				ui.ssh, ui.terminal = client, terminal
-				ui.appendTerminal(ui.text("Connected to ") + profile.Host + "\n")
-				ui.readTerminal(terminal)
-			}, nil
-		})
+		ui.trySSHConnect()
 	}
 	if ui.sshClose.Clicked(gtx) {
 		ui.closeSSH()
 		ui.model.Status = "SSH connection closed."
 	}
-	if ui.sshSend.Clicked(gtx) && ui.terminal != nil {
-		text := ui.terminalInput.Text()
-		if text != "" {
-			if !strings.HasSuffix(text, "\n") {
-				text += "\n"
-			}
-			if _, err := ui.terminal.Write([]byte(text)); err != nil {
-				ui.model.Error = err.Error()
-			}
-			ui.terminalInput.SetText("")
-		}
+	terminalSubmitted := ui.drainEditors(gtx, &ui.terminalInput)
+	formSubmitted := ui.drainEditors(gtx, &ui.sshName, &ui.sshHost, &ui.sshPort, &ui.sshUser, &ui.sshPassword, &ui.sshKeyPath, &ui.sshKeyPass, &ui.sshFingerprint)
+	if ui.sshSend.Clicked(gtx) || terminalSubmitted {
+		ui.sendTerminalInput()
+	} else if formSubmitted {
+		ui.trySSHConnect()
 	}
 }
 
@@ -591,6 +594,12 @@ func (ui *Window) handleStorage(gtx layout.Context) {
 			ui.loadStorageProfile()
 		}
 	}
+	for i := range ui.objectButtons {
+		if ui.objectButtons[i].Clicked(gtx) {
+			ui.selectObject(i)
+		}
+	}
+	ui.drainEditors(gtx, &ui.storageName, &ui.storageEndpoint, &ui.storageRegion, &ui.storageAccess, &ui.storageSecret, &ui.storageBucket, &ui.storagePrefix, &ui.storageKey, &ui.storagePath, &ui.storageData)
 	if ui.storageNew.Clicked(gtx) {
 		ui.storageIndex = -1
 		ui.clearStorageProfile()
@@ -606,11 +615,18 @@ func (ui *Window) handleStorage(gtx layout.Context) {
 		}
 		ui.saveProfile(func(profiles *config.Store) { profiles.S3 = replaceS3(profiles.S3, ui.storageIndex, profile) }, func() { ui.storageIndex = 0 })
 	}
-	profile, err := ui.storageProfile()
-	if err != nil {
-		return
+	profile, profileErr := ui.storageProfile()
+	requireProfile := func() bool {
+		if profileErr != nil {
+			ui.model.Error = profileErr.Error()
+			return false
+		}
+		return true
 	}
 	if ui.storageRefresh.Clicked(gtx) {
+		if !requireProfile() {
+			return
+		}
 		ui.async("Listing remote objects...", func(ctx context.Context) (func(), error) {
 			remote, err := storage.NewS3Storage(profile)
 			if err != nil {
@@ -621,6 +637,13 @@ func (ui *Window) handleStorage(gtx layout.Context) {
 		})
 	}
 	if ui.storageUpload.Clicked(gtx) {
+		if err := requireObjectKey(ui.storageKey.Text()); err != nil {
+			ui.model.Error = err.Error()
+			return
+		}
+		if !requireProfile() {
+			return
+		}
 		key, path, inline := ui.storageKey.Text(), ui.storagePath.Text(), ui.storageData.Text()
 		ui.async("Uploading object...", func(ctx context.Context) (func(), error) {
 			var data []byte
@@ -641,6 +664,13 @@ func (ui *Window) handleStorage(gtx layout.Context) {
 		})
 	}
 	if ui.storageDownload.Clicked(gtx) {
+		if err := requireObjectKey(ui.storageKey.Text()); err != nil {
+			ui.model.Error = err.Error()
+			return
+		}
+		if !requireProfile() {
+			return
+		}
 		key, path := ui.storageKey.Text(), ui.storagePath.Text()
 		ui.async("Downloading object...", func(ctx context.Context) (func(), error) {
 			remote, err := storage.NewS3Storage(profile)
@@ -662,13 +692,22 @@ func (ui *Window) handleStorage(gtx layout.Context) {
 		})
 	}
 	if ui.storageDelete.Clicked(gtx) {
+		if err := requireObjectKey(ui.storageKey.Text()); err != nil {
+			ui.model.Error = err.Error()
+			return
+		}
+		if !requireProfile() {
+			return
+		}
 		key := ui.storageKey.Text()
-		ui.async("Deleting object...", func(ctx context.Context) (func(), error) {
-			remote, err := storage.NewS3Storage(profile)
-			if err != nil {
-				return nil, err
-			}
-			return nil, remote.Delete(ctx, key)
+		ui.requestConfirm("Delete object", "This permanently deletes the object. This action cannot be undone.", func() {
+			ui.async("Deleting object...", func(ctx context.Context) (func(), error) {
+				remote, err := storage.NewS3Storage(profile)
+				if err != nil {
+					return nil, err
+				}
+				return nil, remote.Delete(ctx, key)
+			})
 		})
 	}
 }
@@ -679,6 +718,13 @@ func (ui *Window) handleDatabase(gtx layout.Context) {
 			ui.databaseIndex = i
 			ui.loadDatabaseProfile()
 		}
+	}
+	ui.drainEditors(gtx, &ui.databaseName, &ui.databaseHost, &ui.databasePort, &ui.databaseUser, &ui.databasePassword, &ui.databaseSchema, &ui.databaseSSL, &ui.databaseTLS, &ui.databaseSQL)
+	if ui.databaseMySQLButton.Clicked(gtx) {
+		ui.databaseKind = dbTypeMySQL
+	}
+	if ui.databasePostgresButton.Clicked(gtx) {
+		ui.databaseKind = dbTypePostgres
 	}
 	if ui.databaseNew.Clicked(gtx) {
 		ui.databaseIndex = -1
@@ -692,11 +738,18 @@ func (ui *Window) handleDatabase(gtx layout.Context) {
 		}
 		ui.saveProfile(func(profiles *config.Store) { profiles.DB = replaceDB(profiles.DB, ui.databaseIndex, profile) }, func() { ui.databaseIndex = 0 })
 	}
-	profile, err := ui.databaseProfile()
-	if err != nil {
-		return
+	profile, profileErr := ui.databaseProfile()
+	requireProfile := func() bool {
+		if profileErr != nil {
+			ui.model.Error = profileErr.Error()
+			return false
+		}
+		return true
 	}
 	if ui.databaseTables.Clicked(gtx) {
+		if !requireProfile() {
+			return
+		}
 		ui.async("Loading database tables...", func(ctx context.Context) (func(), error) {
 			client, err := database.NewDBClient(profile)
 			if err != nil {
@@ -708,6 +761,13 @@ func (ui *Window) handleDatabase(gtx layout.Context) {
 		})
 	}
 	if ui.databaseQuery.Clicked(gtx) {
+		if err := requireSQLStatement(ui.databaseSQL.Text()); err != nil {
+			ui.model.Error = err.Error()
+			return
+		}
+		if !requireProfile() {
+			return
+		}
 		query := ui.databaseSQL.Text()
 		ui.async("Running database query...", func(ctx context.Context) (func(), error) {
 			client, err := database.NewDBClient(profile)
@@ -720,17 +780,26 @@ func (ui *Window) handleDatabase(gtx layout.Context) {
 		})
 	}
 	if ui.databaseExec.Clicked(gtx) {
+		if err := requireSQLStatement(ui.databaseSQL.Text()); err != nil {
+			ui.model.Error = err.Error()
+			return
+		}
+		if !requireProfile() {
+			return
+		}
 		query := ui.databaseSQL.Text()
-		ui.async("Executing database statement...", func(ctx context.Context) (func(), error) {
-			client, err := database.NewDBClient(profile)
-			if err != nil {
-				return nil, err
-			}
-			defer client.Close()
-			result, err := client.Exec(ctx, query)
-			return func() {
-				ui.databaseText = fmt.Sprintf("%s%d\n%s%d", ui.text("Rows affected: "), result.RowsAffected, ui.text("Last insert ID: "), result.LastInsertID)
-			}, err
+		ui.requestConfirm("Execute SQL statement", "This runs a statement that can modify data. Continue?", func() {
+			ui.async("Executing database statement...", func(ctx context.Context) (func(), error) {
+				client, err := database.NewDBClient(profile)
+				if err != nil {
+					return nil, err
+				}
+				defer client.Close()
+				result, err := client.Exec(ctx, query)
+				return func() {
+					ui.databaseText = fmt.Sprintf("%s%d\n%s%d", ui.text("Rows affected: "), result.RowsAffected, ui.text("Last insert ID: "), result.LastInsertID)
+				}, err
+			})
 		})
 	}
 }
@@ -742,6 +811,56 @@ func (ui *Window) layout(gtx layout.Context) {
 			layout.Rigid(func(gtx layout.Context) layout.Dimensions { return ui.header(gtx) }),
 			layout.Flexed(1, func(gtx layout.Context) layout.Dimensions { return ui.content(gtx) }),
 		)
+	})
+	if ui.confirm.active {
+		ui.confirmModal(gtx)
+	}
+}
+
+// confirmModal overlays a dimmed scrim with the destructive-action dialog.
+// Clicking the scrim cancels, matching the explicit Cancel button.
+func (ui *Window) confirmModal(gtx layout.Context) {
+	scrim := color.NRGBA{R: 0, G: 0, B: 0, A: 110}
+	layout.Stack{Alignment: layout.Center}.Layout(gtx,
+		layout.Expanded(func(gtx layout.Context) layout.Dimensions {
+			return ui.confirmScrim.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+				paint.FillShape(gtx.Ops, scrim, clip.Rect{Max: gtx.Constraints.Max}.Op())
+				return layout.Dimensions{Size: gtx.Constraints.Max}
+			})
+		}),
+		layout.Stacked(func(gtx layout.Context) layout.Dimensions {
+			return ui.confirmDialog(gtx)
+		}),
+	)
+}
+
+func (ui *Window) confirmDialog(gtx layout.Context) layout.Dimensions {
+	gtx.Constraints.Max.X = min(gtx.Constraints.Max.X, gtx.Dp(440))
+	return ui.surface(gtx, func(gtx layout.Context) layout.Dimensions {
+		return layout.Inset{Top: unit.Dp(18), Bottom: unit.Dp(18), Left: unit.Dp(22), Right: unit.Dp(22)}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+			return layout.Flex{Axis: layout.Vertical, Gap: gtx.Dp(14)}.Layout(gtx,
+				layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+					title := material.H6(ui.theme, ui.text(ui.confirm.title))
+					title.Color = colorDanger
+					return title.Layout(gtx)
+				}),
+				layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+					message := material.Body1(ui.theme, ui.text(ui.confirm.message))
+					message.Color = colorText
+					return message.Layout(gtx)
+				}),
+				layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+					return layout.Flex{Axis: layout.Horizontal, Gap: gtx.Dp(8)}.Layout(gtx,
+						layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+							return ui.button(gtx, &ui.confirmCancelBtn, "Cancel", false)
+						}),
+						layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+							return ui.actionButton(gtx, &ui.confirmAcceptBtn, "Confirm", true, true)
+						}),
+					)
+				}),
+			)
+		})
 	})
 }
 
@@ -787,7 +906,7 @@ func (ui *Window) content(gtx layout.Context) layout.Dimensions {
 func (ui *Window) setupView(gtx layout.Context) layout.Dimensions {
 	return ui.surface(gtx, func(gtx layout.Context) layout.Dimensions {
 		return layout.Inset{Top: unit.Dp(24), Bottom: unit.Dp(24), Left: unit.Dp(28), Right: unit.Dp(28)}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
-			return ui.list.Layout(gtx, 1, func(gtx layout.Context, _ int) layout.Dimensions {
+			return ui.setupList.Layout(gtx, 1, func(gtx layout.Context, _ int) layout.Dimensions {
 				return layout.Flex{Axis: layout.Vertical, Gap: gtx.Dp(12)}.Layout(gtx,
 					layout.Rigid(func(gtx layout.Context) layout.Dimensions {
 						return material.H5(ui.theme, ui.text("Create encrypted vault")).Layout(gtx)
@@ -812,10 +931,10 @@ func (ui *Window) setupView(gtx layout.Context) layout.Dimensions {
 					layout.Rigid(func(gtx layout.Context) layout.Dimensions {
 						return layout.Flex{Axis: layout.Horizontal, Gap: gtx.Dp(10)}.Layout(gtx,
 							layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-								return ui.button(gtx, &ui.setupTest, "Test connection", false)
+								return ui.actionButton(gtx, &ui.setupTest, "Test connection", false, false)
 							}),
 							layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-								return ui.button(gtx, &ui.setupRegister, "Create vault", true)
+								return ui.actionButton(gtx, &ui.setupRegister, "Create vault", true, false)
 							}),
 						)
 					}),
@@ -846,7 +965,9 @@ func (ui *Window) loginView(gtx layout.Context) layout.Dimensions {
 					layout.Rigid(func(gtx layout.Context) layout.Dimensions {
 						return ui.field(gtx, &ui.loginPassword, "Vault password", true, true)
 					}),
-					layout.Rigid(func(gtx layout.Context) layout.Dimensions { return ui.button(gtx, &ui.loginButton, "Sign in", true) }),
+					layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+						return ui.actionButton(gtx, &ui.loginButton, "Sign in", true, false)
+					}),
 					layout.Rigid(func(gtx layout.Context) layout.Dimensions {
 						return ui.button(gtx, &ui.loginRecovery, "Use recovery key", false)
 					}),
@@ -872,7 +993,14 @@ func (ui *Window) recoveryView(gtx layout.Context) layout.Dimensions {
 				layout.Rigid(func(gtx layout.Context) layout.Dimensions { return ui.status(gtx) }),
 				layout.Rigid(func(gtx layout.Context) layout.Dimensions {
 					if ui.model.RecoveryKey != "" {
-						return ui.secretLabel(gtx, ui.model.RecoveryKey)
+						return layout.Flex{Axis: layout.Horizontal, Gap: gtx.Dp(8), Alignment: layout.Middle}.Layout(gtx,
+							layout.Flexed(1, func(gtx layout.Context) layout.Dimensions {
+								return ui.secretLabel(gtx, ui.model.RecoveryKey)
+							}),
+							layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+								return ui.button(gtx, &ui.recoveryCopy, "Copy recovery key", false)
+							}),
+						)
 					}
 					return ui.field(gtx, &ui.recoveryKey, "One-time recovery key", true, false)
 				}),
@@ -888,7 +1016,7 @@ func (ui *Window) recoveryView(gtx layout.Context) layout.Dimensions {
 							return ui.field(gtx, &ui.recoveryPassword, "New vault password", true, true)
 						}),
 						layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-							return ui.button(gtx, &ui.recoverySubmit, "Rotate credentials", true)
+							return ui.actionButton(gtx, &ui.recoverySubmit, "Rotate credentials", true, false)
 						}),
 					)
 				}),
@@ -954,7 +1082,12 @@ func (ui *Window) profileSidebar(gtx layout.Context) layout.Dimensions {
 
 func (ui *Window) profileList(gtx layout.Context) layout.Dimensions {
 	labels := ui.profileLabels()
-	return ui.list.Layout(gtx, len(labels), func(gtx layout.Context, index int) layout.Dimensions {
+	if len(labels) == 0 {
+		hint := material.Body2(ui.theme, ui.text("No profiles yet. Create one below."))
+		hint.Color = colorMuted
+		return hint.Layout(gtx)
+	}
+	return ui.profileScroll.Layout(gtx, len(labels), func(gtx layout.Context, index int) layout.Dimensions {
 		var button *widget.Clickable
 		switch ui.model.Tab {
 		case TabSSH:
@@ -989,16 +1122,29 @@ func (ui *Window) sshView(gtx layout.Context) layout.Dimensions {
 					return ui.editorRow(gtx, "Key passphrase", &ui.sshKeyPass, "Host fingerprint", &ui.sshFingerprint)
 				}),
 				layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-					return ui.actionRow(gtx, []*widget.Clickable{&ui.sshNew, &ui.sshSave, &ui.sshConnect, &ui.sshClose}, []string{"New", "Save profile", "Connect", "Close"})
+					return layout.Flex{Axis: layout.Horizontal, Gap: gtx.Dp(8)}.Layout(gtx,
+						layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+							return ui.button(gtx, &ui.sshNew, "New", false)
+						}),
+						layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+							return ui.actionButton(gtx, &ui.sshSave, "Save profile", false, false)
+						}),
+						layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+							return ui.actionButton(gtx, &ui.sshConnect, "Connect", true, false)
+						}),
+						layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+							return ui.button(gtx, &ui.sshClose, "Close", false)
+						}),
+					)
 				}),
 				layout.Rigid(func(gtx layout.Context) layout.Dimensions {
 					return ui.field(gtx, &ui.terminalInput, "Terminal input", true, false)
 				}),
 				layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-					return ui.button(gtx, &ui.sshSend, "Send to terminal", true)
+					return ui.actionButton(gtx, &ui.sshSend, "Send to terminal", true, false)
 				}),
 				layout.Flexed(1, func(gtx layout.Context) layout.Dimensions {
-					return ui.readOnlyText(gtx, ui.terminalSnapshot(), "Terminal output")
+					return ui.outputList(gtx, &ui.terminalList, ui.terminalSnapshot(), "Terminal output", true)
 				}),
 			)
 		})
@@ -1030,7 +1176,14 @@ func (ui *Window) storageView(gtx layout.Context) layout.Dimensions {
 					return ui.button(gtx, &ui.storagePathButton, label, ui.storagePathStyle)
 				}),
 				layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-					return ui.actionRow(gtx, []*widget.Clickable{&ui.storageNew, &ui.storageSave}, []string{"New", "Save profile"})
+					return layout.Flex{Axis: layout.Horizontal, Gap: gtx.Dp(8)}.Layout(gtx,
+						layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+							return ui.button(gtx, &ui.storageNew, "New", false)
+						}),
+						layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+							return ui.actionButton(gtx, &ui.storageSave, "Save profile", true, false)
+						}),
+					)
 				}),
 				layout.Rigid(func(gtx layout.Context) layout.Dimensions {
 					return ui.editorRow(gtx, "List prefix", &ui.storagePrefix, "Object key", &ui.storageKey)
@@ -1039,10 +1192,30 @@ func (ui *Window) storageView(gtx layout.Context) layout.Dimensions {
 					return ui.editorRow(gtx, "Local path", &ui.storagePath, "Inline upload data", &ui.storageData)
 				}),
 				layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-					return ui.actionRow(gtx, []*widget.Clickable{&ui.storageRefresh, &ui.storageUpload, &ui.storageDownload, &ui.storageDelete}, []string{"Refresh list", "Upload", "Download", "Delete"})
+					return layout.Flex{Axis: layout.Horizontal, Gap: gtx.Dp(8)}.Layout(gtx,
+						layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+							return ui.actionButton(gtx, &ui.storageRefresh, "Refresh list", false, false)
+						}),
+						layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+							return ui.actionButton(gtx, &ui.storageUpload, "Upload", false, false)
+						}),
+						layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+							return ui.actionButton(gtx, &ui.storageDownload, "Download", true, false)
+						}),
+						layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+							return ui.actionButton(gtx, &ui.storageDelete, "Delete", false, true)
+						}),
+					)
 				}),
 				layout.Flexed(1, func(gtx layout.Context) layout.Dimensions {
-					return ui.readOnlyText(gtx, ui.storageText, "Objects and operation output")
+					return layout.Flex{Axis: layout.Vertical, Gap: gtx.Dp(8)}.Layout(gtx,
+						layout.Flexed(1, func(gtx layout.Context) layout.Dimensions {
+							return ui.objectBrowser(gtx)
+						}),
+						layout.Flexed(1, func(gtx layout.Context) layout.Dimensions {
+							return ui.outputList(gtx, &ui.storageOutputList, ui.storageText, "Objects and operation output", false)
+						}),
+					)
 				}),
 			)
 		})
@@ -1058,7 +1231,10 @@ func (ui *Window) databaseView(gtx layout.Context) layout.Dimensions {
 					return material.Subtitle1(ui.theme, ui.text("SQL profile")).Layout(gtx)
 				}),
 				layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-					return ui.editorRow(gtx, "Name", &ui.databaseName, "Type", &ui.databaseType)
+					return ui.field(gtx, &ui.databaseName, "Name", true, false)
+				}),
+				layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+					return ui.dbTypeSelector(gtx, &ui.databaseMySQLButton, &ui.databasePostgresButton, ui.databaseKind)
 				}),
 				layout.Rigid(func(gtx layout.Context) layout.Dimensions {
 					return ui.editorRow(gtx, "Host", &ui.databaseHost, "Port", &ui.databasePort)
@@ -1070,19 +1246,36 @@ func (ui *Window) databaseView(gtx layout.Context) layout.Dimensions {
 					return ui.editorRow(gtx, "Database", &ui.databaseSchema, "SSL mode", &ui.databaseSSL)
 				}),
 				layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-					return ui.editorRow(gtx, "MySQL TLS mode", &ui.databaseTLS, "", nil)
+					return ui.field(gtx, &ui.databaseTLS, "MySQL TLS mode", true, false)
 				}),
 				layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-					return ui.actionRow(gtx, []*widget.Clickable{&ui.databaseNew, &ui.databaseSave}, []string{"New", "Save profile"})
+					return layout.Flex{Axis: layout.Horizontal, Gap: gtx.Dp(8)}.Layout(gtx,
+						layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+							return ui.button(gtx, &ui.databaseNew, "New", false)
+						}),
+						layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+							return ui.actionButton(gtx, &ui.databaseSave, "Save profile", true, false)
+						}),
+					)
 				}),
 				layout.Rigid(func(gtx layout.Context) layout.Dimensions {
 					return ui.field(gtx, &ui.databaseSQL, "SQL query or statement", false, false)
 				}),
 				layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-					return ui.actionRow(gtx, []*widget.Clickable{&ui.databaseTables, &ui.databaseQuery, &ui.databaseExec}, []string{"List tables", "Run query", "Run exec"})
+					return layout.Flex{Axis: layout.Horizontal, Gap: gtx.Dp(8)}.Layout(gtx,
+						layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+							return ui.actionButton(gtx, &ui.databaseTables, "List tables", false, false)
+						}),
+						layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+							return ui.actionButton(gtx, &ui.databaseQuery, "Run query", true, false)
+						}),
+						layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+							return ui.actionButton(gtx, &ui.databaseExec, "Run exec", false, true)
+						}),
+					)
 				}),
 				layout.Flexed(1, func(gtx layout.Context) layout.Dimensions {
-					return ui.readOnlyText(gtx, ui.databaseText, "Database output")
+					return ui.outputList(gtx, &ui.databaseOutputList, ui.databaseText, "Database output", true)
 				}),
 			)
 		})
@@ -1124,7 +1317,10 @@ func (ui *Window) s3BootstrapFields(gtx layout.Context) layout.Dimensions {
 func (ui *Window) sqlBootstrapFields(gtx layout.Context) layout.Dimensions {
 	return layout.Flex{Axis: layout.Vertical, Gap: gtx.Dp(8)}.Layout(gtx,
 		layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-			return ui.editorRow(gtx, "Type", &ui.setupDBType, "Host", &ui.setupDBHost)
+			return ui.dbTypeSelector(gtx, &ui.setupDBMySQLButton, &ui.setupDBPostgresButton, ui.setupDBKind)
+		}),
+		layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+			return ui.field(gtx, &ui.setupDBHost, "Host", true, false)
 		}),
 		layout.Rigid(func(gtx layout.Context) layout.Dimensions {
 			return ui.editorRow(gtx, "Port", &ui.setupDBPort, "User", &ui.setupDBUser)
@@ -1139,17 +1335,26 @@ func (ui *Window) sqlBootstrapFields(gtx layout.Context) layout.Dimensions {
 }
 
 func (ui *Window) status(gtx layout.Context) layout.Dimensions {
-	text := ui.text(ui.model.Status)
-	if ui.busy {
-		text = ui.text("Working...") + " " + text
-	}
 	if ui.model.Error != "" {
 		style := material.Body2(ui.theme, ui.text(ui.model.Error))
 		style.Color = colorDanger
-		style.MaxLines = 4
 		return style.Layout(gtx)
 	}
-	style := material.Body2(ui.theme, text)
+	if ui.busy {
+		return layout.Flex{Axis: layout.Horizontal, Alignment: layout.Middle, Gap: gtx.Dp(8)}.Layout(gtx,
+			layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+				loader := material.Loader(ui.theme)
+				loader.Color = colorTeal
+				return loader.Layout(gtx)
+			}),
+			layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+				style := material.Body2(ui.theme, ui.text("Working...")+" "+ui.text(ui.model.Status))
+				style.Color = colorMuted
+				return style.Layout(gtx)
+			}),
+		)
+	}
+	style := material.Body2(ui.theme, ui.text(ui.model.Status))
 	style.Color = colorMuted
 	return style.Layout(gtx)
 }
@@ -1216,11 +1421,26 @@ func (ui *Window) field(gtx layout.Context, editor *widget.Editor, hint string, 
 	}
 	editor.SingleLine = singleLine
 	editor.Submit = singleLine
-	if password {
-		editor.Mask = '•'
-	} else {
+	if !password {
 		editor.Mask = 0
+		return ui.editorField(gtx, editor, hint)
 	}
+	reveal := ui.revealFor(editor)
+	if reveal.button.Clicked(gtx) {
+		reveal.state.toggle()
+	}
+	editor.Mask = reveal.state.mask()
+	return layout.Flex{Axis: layout.Horizontal, Alignment: layout.Middle, Gap: gtx.Dp(6)}.Layout(gtx,
+		layout.Flexed(1, func(gtx layout.Context) layout.Dimensions {
+			return ui.editorField(gtx, editor, hint)
+		}),
+		layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+			return ui.button(gtx, &reveal.button, revealLabel(reveal.state.shown), false)
+		}),
+	)
+}
+
+func (ui *Window) editorField(gtx layout.Context, editor *widget.Editor, hint string) layout.Dimensions {
 	gtx.Constraints.Min.X = gtx.Constraints.Max.X
 	style := material.Editor(ui.theme, editor, ui.text(hint))
 	style.Color = colorText
@@ -1228,27 +1448,38 @@ func (ui *Window) field(gtx layout.Context, editor *widget.Editor, hint string, 
 	return style.Layout(gtx)
 }
 
-func (ui *Window) editorRow(gtx layout.Context, left string, leftEditor *widget.Editor, right string, rightEditor *widget.Editor) layout.Dimensions {
-	return layout.Flex{Axis: layout.Horizontal, Gap: gtx.Dp(10)}.Layout(gtx,
-		layout.Flexed(1, func(gtx layout.Context) layout.Dimensions {
-			return ui.field(gtx, leftEditor, left, true, strings.Contains(strings.ToLower(left), "password") || strings.Contains(strings.ToLower(left), "secret"))
-		}),
-		layout.Flexed(1, func(gtx layout.Context) layout.Dimensions {
-			if rightEditor == nil {
-				return layout.Dimensions{}
-			}
-			return ui.field(gtx, rightEditor, right, true, strings.Contains(strings.ToLower(right), "password") || strings.Contains(strings.ToLower(right), "secret"))
-		}),
-	)
+func (ui *Window) revealFor(editor *widget.Editor) *editorReveal {
+	if ui.reveals == nil {
+		ui.reveals = make(map[*widget.Editor]*editorReveal)
+	}
+	reveal, ok := ui.reveals[editor]
+	if !ok {
+		reveal = &editorReveal{}
+		ui.reveals[editor] = reveal
+	}
+	return reveal
 }
 
-func (ui *Window) actionRow(gtx layout.Context, buttons []*widget.Clickable, labels []string) layout.Dimensions {
-	children := make([]layout.FlexChild, 0, len(buttons))
-	for i := range buttons {
-		button, label := buttons[i], labels[i]
-		children = append(children, layout.Rigid(func(gtx layout.Context) layout.Dimensions { return ui.button(gtx, button, label, i == len(buttons)-1) }))
+func (ui *Window) editorRow(gtx layout.Context, left string, leftEditor *widget.Editor, right string, rightEditor *widget.Editor) layout.Dimensions {
+	leftField := func(gtx layout.Context) layout.Dimensions {
+		return ui.field(gtx, leftEditor, left, true, isSecretHint(left))
 	}
-	return layout.Flex{Axis: layout.Horizontal, Gap: gtx.Dp(8)}.Layout(gtx, children...)
+	rightField := func(gtx layout.Context) layout.Dimensions {
+		if rightEditor == nil {
+			return layout.Dimensions{}
+		}
+		return ui.field(gtx, rightEditor, right, true, isSecretHint(right))
+	}
+	if useStackedRow(int(float32(gtx.Constraints.Max.X) / gtx.Metric.PxPerDp)) {
+		return layout.Flex{Axis: layout.Vertical, Gap: gtx.Dp(6)}.Layout(gtx,
+			layout.Rigid(leftField),
+			layout.Rigid(rightField),
+		)
+	}
+	return layout.Flex{Axis: layout.Horizontal, Gap: gtx.Dp(10)}.Layout(gtx,
+		layout.Flexed(1, leftField),
+		layout.Flexed(1, rightField),
+	)
 }
 
 func (ui *Window) button(gtx layout.Context, click *widget.Clickable, text string, primary bool) layout.Dimensions {
@@ -1265,18 +1496,98 @@ func (ui *Window) button(gtx layout.Context, click *widget.Clickable, text strin
 	return style.Layout(gtx)
 }
 
-func (ui *Window) readOnlyText(gtx layout.Context, text, hint string) layout.Dimensions {
-	style := material.Body2(ui.theme, text)
-	style.Color = colorText
-	style.MaxLines = 100
+// actionButton renders an operation button. Busy work dims it so blocked
+// actions never look clickable, and destructive actions render in danger red.
+func (ui *Window) actionButton(gtx layout.Context, click *widget.Clickable, text string, primary, danger bool) layout.Dimensions {
+	style := material.Button(ui.theme, click, ui.text(text))
+	style.CornerRadius = unit.Dp(6)
+	style.Inset = layout.Inset{Top: 8, Bottom: 8, Left: 14, Right: 14}
+	switch {
+	case ui.busy:
+		background, foreground := buttonColors(true, false)
+		style.Background, style.Color = background, foreground
+	case danger:
+		background, foreground := buttonColors(false, true)
+		style.Background, style.Color = background, foreground
+	case primary:
+		style.Background, style.Color = colorTeal, colorBackground
+	default:
+		background, foreground := buttonColors(false, false)
+		style.Background, style.Color = background, foreground
+	}
+	return style.Layout(gtx)
+}
+
+// outputList renders scrollable operation output that sticks to the bottom as
+// new content arrives, bounded to the most recent lines.
+func (ui *Window) outputList(gtx layout.Context, list *layout.List, content, hint string, mono bool) layout.Dimensions {
 	return layout.Inset{Top: unit.Dp(8), Bottom: unit.Dp(8), Left: unit.Dp(8), Right: unit.Dp(8)}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
-		if text == "" {
+		if content == "" {
 			muted := material.Body2(ui.theme, ui.text(hint))
 			muted.Color = colorMuted
 			return muted.Layout(gtx)
 		}
-		return style.Layout(gtx)
+		if !list.Position.BeforeEnd {
+			list.Position.Offset = math.MaxInt32
+		}
+		return list.Layout(gtx, 1, func(gtx layout.Context, _ int) layout.Dimensions {
+			style := material.Body1(ui.theme, tailLines(content, outputMaxLines))
+			style.Color = colorText
+			if mono {
+				style.Font.Typeface = monoTypeface
+			}
+			return style.Layout(gtx)
+		})
 	})
+}
+
+// objectBrowser renders the clickable listing of the current S3 objects;
+// selecting an entry copies its key into the object key editor.
+func (ui *Window) objectBrowser(gtx layout.Context) layout.Dimensions {
+	ui.ensureObjectButtons()
+	if len(ui.objects) == 0 {
+		muted := material.Body2(ui.theme, ui.objectsHeader(0))
+		muted.Color = colorMuted
+		return muted.Layout(gtx)
+	}
+	return layout.Flex{Axis: layout.Vertical, Gap: gtx.Dp(4)}.Layout(gtx,
+		layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+			header := material.Body2(ui.theme, ui.objectsHeader(len(ui.objects)))
+			header.Color = colorMuted
+			return header.Layout(gtx)
+		}),
+		layout.Flexed(1, func(gtx layout.Context) layout.Dimensions {
+			return ui.objectList.Layout(gtx, len(ui.objects), func(gtx layout.Context, index int) layout.Dimensions {
+				label := fmt.Sprintf("%s (%d %s)", ui.objects[index].Key, ui.objects[index].Size, ui.text("Bytes"))
+				return ui.button(gtx, &ui.objectButtons[index], label, false)
+			})
+		}),
+	)
+}
+
+func (ui *Window) ensureObjectButtons() {
+	if len(ui.objectButtons) != len(ui.objects) {
+		ui.objectButtons = make([]widget.Clickable, len(ui.objects))
+	}
+}
+
+func (ui *Window) ensureRemoteObjectButtons() {
+	if len(ui.remoteObjectButtons) != len(ui.remoteObjects) {
+		ui.remoteObjectButtons = make([]widget.Clickable, len(ui.remoteObjects))
+	}
+}
+
+// dbTypeSelector renders the MySQL / PostgreSQL picker for the given kind.
+func (ui *Window) dbTypeSelector(gtx layout.Context, mysqlButton, postgresButton *widget.Clickable, kind string) layout.Dimensions {
+	choices := dbTypeChoices()
+	return layout.Flex{Axis: layout.Horizontal, Gap: gtx.Dp(8)}.Layout(gtx,
+		layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+			return ui.button(gtx, mysqlButton, choices[0], kind == dbTypeMySQL)
+		}),
+		layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+			return ui.button(gtx, postgresButton, choices[1], kind == dbTypePostgres)
+		}),
+	)
 }
 
 func (ui *Window) surface(gtx layout.Context, child layout.Widget) layout.Dimensions {
@@ -1295,16 +1606,20 @@ func (ui *Window) setupBootstrap() (coreapp.Bootstrap, error) {
 			Endpoint: endpoint, Region: region, AccessKey: access, SecretKey: secret, Bucket: bucket, UsePathStyle: ui.setupPathStyle,
 		}}, nil
 	}
-	typeName, host, user, password, databaseName := strings.TrimSpace(ui.setupDBType.Text()), strings.TrimSpace(ui.setupDBHost.Text()), strings.TrimSpace(ui.setupDBUser.Text()), ui.setupDBPassword.Text(), strings.TrimSpace(ui.setupDBDatabase.Text())
-	if typeName == "" || host == "" || strings.TrimSpace(ui.setupDBPort.Text()) == "" || user == "" || password == "" || databaseName == "" {
-		return coreapp.Bootstrap{}, fmt.Errorf("SQL type, host, port, user, password, and database are required")
+	kind, err := normalizeDBType(ui.setupDBKind)
+	if err != nil {
+		return coreapp.Bootstrap{}, err
+	}
+	host, user, password, databaseName := strings.TrimSpace(ui.setupDBHost.Text()), strings.TrimSpace(ui.setupDBUser.Text()), ui.setupDBPassword.Text(), strings.TrimSpace(ui.setupDBDatabase.Text())
+	if host == "" || strings.TrimSpace(ui.setupDBPort.Text()) == "" || user == "" || password == "" || databaseName == "" {
+		return coreapp.Bootstrap{}, fmt.Errorf("SQL host, port, user, password, and database are required")
 	}
 	port, err := parsePort(ui.setupDBPort.Text())
 	if err != nil {
 		return coreapp.Bootstrap{}, err
 	}
 	return coreapp.Bootstrap{Backend: "sql", DB: config.DBProfile{
-		Type: typeName, Host: host, Port: port, User: user, Password: password, Database: databaseName, SSLMode: strings.TrimSpace(ui.setupDBSSL.Text()),
+		Type: kind, Host: host, Port: port, User: user, Password: password, Database: databaseName, SSLMode: strings.TrimSpace(ui.setupDBSSL.Text()),
 	}}, nil
 }
 
@@ -1511,7 +1826,7 @@ func (ui *Window) loadDatabaseProfileFrom(profiles *config.Store) {
 	}
 	p := profiles.DB[ui.databaseIndex]
 	ui.databaseName.SetText(p.Name)
-	ui.databaseType.SetText(p.Type)
+	ui.databaseKind = applyDatabaseKind(ui.databaseKind, p.Type)
 	ui.databaseHost.SetText(p.Host)
 	ui.databasePort.SetText(strconv.Itoa(p.Port))
 	ui.databaseUser.SetText(p.User)
@@ -1521,18 +1836,23 @@ func (ui *Window) loadDatabaseProfileFrom(profiles *config.Store) {
 	ui.databaseTLS.SetText(p.TLSMode)
 }
 func (ui *Window) clearDatabaseProfile() {
-	for _, editor := range []*widget.Editor{&ui.databaseName, &ui.databaseType, &ui.databaseHost, &ui.databasePort, &ui.databaseUser, &ui.databasePassword, &ui.databaseSchema, &ui.databaseSSL, &ui.databaseTLS} {
+	for _, editor := range []*widget.Editor{&ui.databaseName, &ui.databaseHost, &ui.databasePort, &ui.databaseUser, &ui.databasePassword, &ui.databaseSchema, &ui.databaseSSL, &ui.databaseTLS} {
 		editor.SetText("")
 	}
+	ui.databaseKind = dbTypeMySQL
 }
 func (ui *Window) databaseProfile() (config.DBProfile, error) {
+	kind, err := normalizeDBType(ui.databaseKind)
+	if err != nil {
+		return config.DBProfile{}, err
+	}
 	port, err := parsePort(ui.databasePort.Text())
 	if err != nil {
 		return config.DBProfile{}, err
 	}
-	p := config.DBProfile{Name: ui.databaseName.Text(), Type: ui.databaseType.Text(), Host: ui.databaseHost.Text(), Port: port, User: ui.databaseUser.Text(), Password: ui.databasePassword.Text(), Database: ui.databaseSchema.Text(), SSLMode: ui.databaseSSL.Text(), TLSMode: ui.databaseTLS.Text()}
-	if strings.TrimSpace(p.Name) == "" || strings.TrimSpace(p.Type) == "" || strings.TrimSpace(p.Host) == "" || p.User == "" || p.Password == "" || p.Database == "" {
-		return config.DBProfile{}, fmt.Errorf("database name, type, host, user, password, and database are required")
+	p := config.DBProfile{Name: ui.databaseName.Text(), Type: kind, Host: ui.databaseHost.Text(), Port: port, User: ui.databaseUser.Text(), Password: ui.databasePassword.Text(), Database: ui.databaseSchema.Text(), SSLMode: ui.databaseSSL.Text(), TLSMode: ui.databaseTLS.Text()}
+	if strings.TrimSpace(p.Name) == "" || strings.TrimSpace(p.Host) == "" || p.User == "" || p.Password == "" || p.Database == "" {
+		return config.DBProfile{}, fmt.Errorf("database name, host, user, password, and database are required")
 	}
 	return p, nil
 }
@@ -1580,7 +1900,7 @@ func replaceDB(profiles []config.DBProfile, index int, value config.DBProfile) [
 
 func (ui *Window) appendTerminal(text string) {
 	ui.terminalMu.Lock()
-	ui.terminalText += text
+	ui.terminalText = appendTerminalFilter(ui.terminalText, text, terminalMaxRunes)
 	ui.terminalMu.Unlock()
 }
 func (ui *Window) terminalSnapshot() string {
@@ -1588,7 +1908,7 @@ func (ui *Window) terminalSnapshot() string {
 	defer ui.terminalMu.RUnlock()
 	return ui.terminalText
 }
-func (ui *Window) readTerminal(terminal *sshclient.Terminal) {
+func (ui *Window) readTerminal(terminal ptyTerminal) {
 	go func() {
 		buf := make([]byte, 4096)
 		for {

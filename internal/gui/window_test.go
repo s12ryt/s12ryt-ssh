@@ -226,12 +226,12 @@ func TestLocalValidationMessagesAreStableTranslationSources(t *testing.T) {
 	}
 
 	ui.setupBackend = "sql"
-	ui.setupDBType.SetText("postgres")
+	ui.setupDBKind = dbTypePostgres
 	ui.setupDBHost.SetText("localhost")
 	ui.setupDBUser.SetText("user")
 	ui.setupDBPassword.SetText("password")
 	ui.setupDBDatabase.SetText("app")
-	if _, err := ui.setupBootstrap(); err == nil || err.Error() != "SQL type, host, port, user, password, and database are required" {
+	if _, err := ui.setupBootstrap(); err == nil || err.Error() != "SQL host, port, user, password, and database are required" {
 		t.Fatalf("incomplete SQL bootstrap error = %v", err)
 	}
 
