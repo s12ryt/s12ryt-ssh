@@ -84,7 +84,7 @@ func TestGUIStringsTranslateToTraditionalChinese(t *testing.T) {
 		"Bytes",
 		"vault name and password are required",
 		"S3 endpoint, bucket, access key, and secret key are required",
-		"SQL type, host, port, user, password, and database are required",
+		"SQL host, port, user, password, and database are required",
 		"recovery key, new vault name, and new vault password are required",
 		"SSH profiles",
 		"Storage profiles",

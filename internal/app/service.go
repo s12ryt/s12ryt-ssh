@@ -404,7 +404,7 @@ func validateBootstrap(bootstrap Bootstrap) error {
 		}
 	case "sql":
 		if strings.TrimSpace(bootstrap.DB.Type) == "" || strings.TrimSpace(bootstrap.DB.Host) == "" || bootstrap.DB.Port <= 0 || bootstrap.DB.User == "" || bootstrap.DB.Password == "" || bootstrap.DB.Database == "" {
-			return fmt.Errorf("%w: SQL type, host, port, user, password, and database are required", ErrInvalidBootstrap)
+			return fmt.Errorf("%w: SQL host, port, user, password, and database are required", ErrInvalidBootstrap)
 		}
 		client, err := database.NewDBClient(bootstrap.DB)
 		if err != nil {
