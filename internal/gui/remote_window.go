@@ -21,34 +21,12 @@ func (ui *Window) handleRemoteLogin(gtx layout.Context) {
 		ui.model.CancelRemoteLogin()
 		return
 	}
+	if ui.drainEditors(gtx, &ui.remoteURL, &ui.remoteUsername, &ui.remotePassword) {
+		ui.tryRemoteSignIn()
+		return
+	}
 	if ui.remoteLogin.Clicked(gtx) {
-		rawURL := strings.TrimSpace(ui.remoteURL.Text())
-		username := strings.TrimSpace(ui.remoteUsername.Text())
-		password := ui.remotePassword.Text()
-		if err := validateRemoteCredentials(rawURL, username, password); err != nil {
-			ui.model.Error = err.Error()
-			return
-		}
-		if ui.model.RemoteService == nil {
-			ui.model.Error = "Remote authentication service is unavailable"
-			return
-		}
-		service := ui.model.RemoteService
-		ui.async("Signing in to authentication service...", func(ctx context.Context) (func(), error) {
-			session, err := service.Login(ctx, rawURL, username, password)
-			if err != nil {
-				return nil, err
-			}
-			resources, err := session.Resources(ctx)
-			if err != nil {
-				_ = session.Logout(ctx)
-				return nil, err
-			}
-			return func() {
-				ui.remotePassword.SetText("")
-				ui.activateRemoteSession(session, resources)
-			}, nil
-		})
+		ui.tryRemoteSignIn()
 	}
 	if ui.remoteRestore.Clicked(gtx) {
 		if ui.model.RemoteService == nil {
@@ -77,6 +55,8 @@ func (ui *Window) activateRemoteSession(session RemoteSession, resources []remot
 	ui.remoteResourceButtons = make([]widget.Clickable, len(resources))
 	ui.remoteIndex = -1
 	ui.selectFirstRemoteResource()
+	ui.remoteObjects = nil
+	ui.remoteObjectButtons = nil
 	ui.storageText = ""
 	ui.databaseText = ""
 }
@@ -93,7 +73,7 @@ func (ui *Window) selectFirstRemoteResource() {
 func (ui *Window) handleRemoteWorkspace(gtx layout.Context) {
 	if ui.logout.Clicked(gtx) {
 		session := ui.model.RemoteSession
-		ui.asyncAlways("Working...", func(ctx context.Context) (func(), error) {
+		ui.asyncAlways("Signing out...", func(ctx context.Context) (func(), error) {
 			var err error
 			if session != nil {
 				err = session.Logout(ctx)
@@ -161,6 +141,12 @@ func (ui *Window) selectedRemoteResource(operation remote.Operation) (RemoteSess
 }
 
 func (ui *Window) handleRemoteStorage(gtx layout.Context) {
+	for i := range ui.remoteObjectButtons {
+		if ui.remoteObjectButtons[i].Clicked(gtx) {
+			ui.selectRemoteObject(i)
+		}
+	}
+	ui.drainEditors(gtx, &ui.storagePrefix, &ui.storageKey, &ui.storagePath, &ui.storageData)
 	if ui.storageRefresh.Clicked(gtx) {
 		session, resource, err := ui.selectedRemoteResource(remote.OperationS3Read)
 		if err != nil {
@@ -170,10 +156,17 @@ func (ui *Window) handleRemoteStorage(gtx layout.Context) {
 		prefix := ui.storagePrefix.Text()
 		ui.async("Listing remote objects...", func(ctx context.Context) (func(), error) {
 			objects, err := session.ListObjects(ctx, resource.ID, prefix)
-			return func() { ui.storageText = ui.formatRemoteObjects(objects) }, err
+			return func() {
+				ui.remoteObjects = objects
+				ui.storageText = ui.formatRemoteObjects(objects)
+			}, err
 		})
 	}
 	if ui.storageUpload.Clicked(gtx) {
+		if err := requireObjectKey(ui.storageKey.Text()); err != nil {
+			ui.model.Error = err.Error()
+			return
+		}
 		session, resource, err := ui.selectedRemoteResource(remote.OperationS3Write)
 		if err != nil {
 			ui.model.Error = err.Error()
@@ -203,6 +196,10 @@ func (ui *Window) handleRemoteStorage(gtx layout.Context) {
 		})
 	}
 	if ui.storageDownload.Clicked(gtx) {
+		if err := requireObjectKey(ui.storageKey.Text()); err != nil {
+			ui.model.Error = err.Error()
+			return
+		}
 		session, resource, err := ui.selectedRemoteResource(remote.OperationS3Read)
 		if err != nil {
 			ui.model.Error = err.Error()
@@ -242,19 +239,26 @@ func (ui *Window) handleRemoteStorage(gtx layout.Context) {
 		})
 	}
 	if ui.storageDelete.Clicked(gtx) {
+		if err := requireObjectKey(ui.storageKey.Text()); err != nil {
+			ui.model.Error = err.Error()
+			return
+		}
 		session, resource, err := ui.selectedRemoteResource(remote.OperationS3Delete)
 		if err != nil {
 			ui.model.Error = err.Error()
 			return
 		}
 		key := ui.storageKey.Text()
-		ui.async("Deleting object...", func(ctx context.Context) (func(), error) {
-			return nil, session.DeleteObject(ctx, resource.ID, key)
+		ui.requestConfirm("Delete object", "This permanently deletes the object. This action cannot be undone.", func() {
+			ui.async("Deleting object...", func(ctx context.Context) (func(), error) {
+				return nil, session.DeleteObject(ctx, resource.ID, key)
+			})
 		})
 	}
 }
 
 func (ui *Window) handleRemoteDatabase(gtx layout.Context) {
+	ui.drainEditors(gtx, &ui.databaseSQL)
 	if ui.databaseTables.Clicked(gtx) {
 		session, resource, err := ui.selectedRemoteResource(remote.OperationSQLTables)
 		if err != nil {
@@ -267,6 +271,10 @@ func (ui *Window) handleRemoteDatabase(gtx layout.Context) {
 		})
 	}
 	if ui.databaseQuery.Clicked(gtx) {
+		if err := requireSQLStatement(ui.databaseSQL.Text()); err != nil {
+			ui.model.Error = err.Error()
+			return
+		}
 		session, resource, err := ui.selectedRemoteResource(remote.OperationSQLQuery)
 		if err != nil {
 			ui.model.Error = err.Error()
@@ -279,17 +287,23 @@ func (ui *Window) handleRemoteDatabase(gtx layout.Context) {
 		})
 	}
 	if ui.databaseExec.Clicked(gtx) {
+		if err := requireSQLStatement(ui.databaseSQL.Text()); err != nil {
+			ui.model.Error = err.Error()
+			return
+		}
 		session, resource, err := ui.selectedRemoteResource(remote.OperationSQLExec)
 		if err != nil {
 			ui.model.Error = err.Error()
 			return
 		}
 		statement := ui.databaseSQL.Text()
-		ui.async("Executing database statement...", func(ctx context.Context) (func(), error) {
-			result, err := session.Exec(ctx, resource.ID, statement, nil)
-			return func() {
-				ui.databaseText = fmt.Sprintf("%s%d\n%s%s", ui.text("Rows affected: "), result.RowsAffected, ui.text("Last insert ID: "), result.LastInsertID)
-			}, err
+		ui.requestConfirm("Execute SQL statement", "This runs a statement that can modify data. Continue?", func() {
+			ui.async("Executing database statement...", func(ctx context.Context) (func(), error) {
+				result, err := session.Exec(ctx, resource.ID, statement, nil)
+				return func() {
+					ui.databaseText = fmt.Sprintf("%s%d\n%s%s", ui.text("Rows affected: "), result.RowsAffected, ui.text("Last insert ID: "), result.LastInsertID)
+				}, err
+			})
 		})
 	}
 }
@@ -316,7 +330,7 @@ func (ui *Window) remoteLoginView(gtx layout.Context) layout.Dimensions {
 						return ui.field(gtx, &ui.remotePassword, "Password", true, true)
 					}),
 					layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-						return ui.button(gtx, &ui.remoteLogin, "Sign in remotely", true)
+						return ui.actionButton(gtx, &ui.remoteLogin, "Sign in remotely", true, false)
 					}),
 					layout.Rigid(func(gtx layout.Context) layout.Dimensions {
 						return ui.button(gtx, &ui.remoteRestore, "Restore saved session", false)
@@ -374,7 +388,7 @@ func (ui *Window) remoteSidebar(gtx layout.Context) layout.Dimensions {
 					if len(indices) == 0 {
 						return material.Body2(ui.theme, ui.text("No assigned connections.")).Layout(gtx)
 					}
-					return ui.list.Layout(gtx, len(indices), func(gtx layout.Context, listIndex int) layout.Dimensions {
+					return ui.remoteList.Layout(gtx, len(indices), func(gtx layout.Context, listIndex int) layout.Dimensions {
 						resourceIndex := indices[listIndex]
 						return ui.button(gtx, &ui.remoteResourceButtons[resourceIndex], ui.remoteResources[resourceIndex].Name, ui.remoteIndex == resourceIndex)
 					})
@@ -402,14 +416,21 @@ func (ui *Window) remoteStorageView(gtx layout.Context) layout.Dimensions {
 				}),
 				layout.Rigid(func(gtx layout.Context) layout.Dimensions {
 					return ui.remoteActionRow(gtx, []remoteAction{
-						{&ui.storageRefresh, "Refresh list", remote.OperationS3Read},
-						{&ui.storageUpload, "Upload", remote.OperationS3Write},
-						{&ui.storageDownload, "Download", remote.OperationS3Read},
-						{&ui.storageDelete, "Delete", remote.OperationS3Delete},
+						{&ui.storageRefresh, "Refresh list", remote.OperationS3Read, false, false},
+						{&ui.storageUpload, "Upload", remote.OperationS3Write, false, false},
+						{&ui.storageDownload, "Download", remote.OperationS3Read, true, false},
+						{&ui.storageDelete, "Delete", remote.OperationS3Delete, false, true},
 					})
 				}),
 				layout.Flexed(1, func(gtx layout.Context) layout.Dimensions {
-					return ui.readOnlyText(gtx, ui.storageText, "Remote objects and operation output")
+					return layout.Flex{Axis: layout.Vertical, Gap: gtx.Dp(8)}.Layout(gtx,
+						layout.Flexed(1, func(gtx layout.Context) layout.Dimensions {
+							return ui.remoteObjectBrowser(gtx)
+						}),
+						layout.Flexed(1, func(gtx layout.Context) layout.Dimensions {
+							return ui.outputList(gtx, &ui.storageOutputList, ui.storageText, "Remote objects and operation output", false)
+						}),
+					)
 				}),
 			)
 		})
@@ -428,13 +449,13 @@ func (ui *Window) remoteDatabaseView(gtx layout.Context) layout.Dimensions {
 				}),
 				layout.Rigid(func(gtx layout.Context) layout.Dimensions {
 					return ui.remoteActionRow(gtx, []remoteAction{
-						{&ui.databaseTables, "List tables", remote.OperationSQLTables},
-						{&ui.databaseQuery, "Run query", remote.OperationSQLQuery},
-						{&ui.databaseExec, "Run exec", remote.OperationSQLExec},
+						{&ui.databaseTables, "List tables", remote.OperationSQLTables, false, false},
+						{&ui.databaseQuery, "Run query", remote.OperationSQLQuery, true, false},
+						{&ui.databaseExec, "Run exec", remote.OperationSQLExec, false, true},
 					})
 				}),
 				layout.Flexed(1, func(gtx layout.Context) layout.Dimensions {
-					return ui.readOnlyText(gtx, ui.databaseText, "Remote database output")
+					return ui.outputList(gtx, &ui.databaseOutputList, ui.databaseText, "Remote database output", true)
 				}),
 			)
 		})
@@ -445,6 +466,8 @@ type remoteAction struct {
 	button    *widget.Clickable
 	label     string
 	operation remote.Operation
+	primary   bool
+	danger    bool
 }
 
 func (ui *Window) remoteActionRow(gtx layout.Context, actions []remoteAction) layout.Dimensions {
@@ -455,13 +478,36 @@ func (ui *Window) remoteActionRow(gtx layout.Context, actions []remoteAction) la
 			continue
 		}
 		children = append(children, layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-			return ui.button(gtx, action.button, action.label, false)
+			return ui.actionButton(gtx, action.button, action.label, action.primary, action.danger)
 		}))
 	}
 	if len(children) == 0 {
 		return material.Body2(ui.theme, ui.text("Permission not granted for this operation")).Layout(gtx)
 	}
 	return layout.Flex{Axis: layout.Horizontal, Gap: gtx.Dp(8)}.Layout(gtx, children...)
+}
+
+// remoteObjectBrowser renders the clickable listing of remote S3 objects.
+func (ui *Window) remoteObjectBrowser(gtx layout.Context) layout.Dimensions {
+	ui.ensureRemoteObjectButtons()
+	if len(ui.remoteObjects) == 0 {
+		muted := material.Body2(ui.theme, ui.objectsHeader(0))
+		muted.Color = colorMuted
+		return muted.Layout(gtx)
+	}
+	return layout.Flex{Axis: layout.Vertical, Gap: gtx.Dp(4)}.Layout(gtx,
+		layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+			header := material.Body2(ui.theme, ui.objectsHeader(len(ui.remoteObjects)))
+			header.Color = colorMuted
+			return header.Layout(gtx)
+		}),
+		layout.Flexed(1, func(gtx layout.Context) layout.Dimensions {
+			return ui.remoteObjectList.Layout(gtx, len(ui.remoteObjects), func(gtx layout.Context, index int) layout.Dimensions {
+				label := fmt.Sprintf("%s (%d %s)", ui.remoteObjects[index].Key, ui.remoteObjects[index].Size, ui.text("Bytes"))
+				return ui.button(gtx, &ui.remoteObjectButtons[index], label, false)
+			})
+		}),
+	)
 }
 
 func (ui *Window) formatRemoteObjects(objects []remote.S3Object) string {
