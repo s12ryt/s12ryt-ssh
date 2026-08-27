@@ -90,3 +90,23 @@
 - 使用者明確要求推送後，依 git-master 將 60 個檔案拆成 27 個英文 plain-style 原子提交，推送 `main` 至 `origin/main`；推送範圍為 `d5914e8..2c3912f`。
 - 推送前確認工作樹乾淨、27 個提交完整、`server/.env`、SQLite、`node_modules`、`dist` 與 runtime data 未被追蹤，且 `git diff --check origin/main..HEAD` 通過。
 - GitHub Actions run `33036030920` 完整成功：Node 22 server checks、Go 1.25.x/1.26.x checks、govulncheck、secret scan、Windows GUI build全部通過；僅有第三方 actions 的 Node.js 20 deprecation 非阻塞提示。
+
+## 2026-08-27：UI 自主疊代升級（檔案操作與驗證）
+
+- 讀取：window.go/remote_window.go/model.go 全文、ui_upgrade 相關、i18n.go translations 區段、module cache 內 Gio v0.10.2（clipboard.WriteCmd stream API、material.Loader、gofont.Collection 含 Go Mono、Editor.Update 迴圈取代 Events()）。
+- 修改 `agent/question.md`：增補本輪 UI 疊代範圍、確認框形態、響應式堆疊與驗收標準。
+- 新增 `internal/gui/ui_upgrade.go` 與 `ui_upgrade_test.go`（20 個測試：ANSI 過濾、terminal 上限、tailLines、submit 消費、confirmation 狀態機、DB type 正規化、堆疊判定、secret 判定含 passphrase、reveal mask、按鈕配色、必填驗證、fakeTerminal、selectObject、try* 方法、繁中翻譯 17 字串、requestConfirm busy 防護）。
+- 修改 `internal/gui/window.go`：八個獨立 List、kind 欄位+selector、drainEditors/requestConfirm/confirmModal、actionButton/outputList/objectBrowser、status Loader、recovery 複製、editorRow 響應式、appendTerminalFilter、Shaper gofont。
+- 修改 `internal/gui/remote_window.go`：remoteList、遠端確認框、物件點選、outputList、Signing out...、remoteAction primary/danger。
+- 修改 `internal/gui/window_test.go`：setupDBKind 取代 editor、錯誤字串更新。
+- 修改 `internal/i18n/i18n.go`：19 個新 Key 英繁對稱、KeySQLBootstrap/KeyDatabaseRequired 移除 type 字樣。
+- 驗證：`go test ./internal/gui -count=1` ok；全套 `go test -count=1`（排除本機 i18n）10 套件 ok；`go vet ./...` exit 0；`go build ./...` exit 0；gofmt clean；i18n 字典靜態對稱（translations 87/87、extra 74/74、零差集）。
+- 未執行：本機 i18n 測試（防毒隔離 exe，交 GitHub CI）、Windows GUI linker build、commit/push。
+
+## 2026-08-27：UI 升級提交與 CI 回歸修復（Git 操作）
+
+- 讀取：`git status/diff/log -30`（風格偵測 ENGLISH+PLAIN）、i18n diff、service.go:399-417 validateBootstrap、window.go setupBootstrap、i18n.go 字典英繁值、CI 失敗日誌（gh run view --log-failed）。
+- 寫入：`agent/question.md`（需求契約增補）、`agent/deep_todos.md`、`agent/memory.md`、`agent/項目表.md` 紀錄更新。
+- Git 操作：`$env:GIT_MASTER='1'` 下建立 5 個原子提交——f679527 Extend interface translations、3d19864 Add interface upgrade helpers、1b618d4 Update local workspace interface、9ddcbf0 Update remote workspace interface、ad04369 Align translated validation messages（fix）；push 8fa9202..ad04369 main→origin/main。
+- 缺陷修復：run 33043969578 RED（TestGUIStringsTranslateToTraditionalChinese 對舊字串 "SQL type, host, ..." 反查失敗）；根因＝字典改了但 service.go:407 與 i18n_test.go:87 未同步；GREEN 證據＝run 33050084208 六個 job 全部成功（Go 1.25.x/1.26.x test/vet/build、govulncheck、gitleaks、Node 22 server checks、Windows GUI build）。
+- 本輪限制照舊：本機不跑 internal/i18n 測試（防毒誤判測試執行檔）、不重產 .exe、race/gopls 不可用；替代證據為精確字串一致性 grep + 字典靜態對稱 + GitHub Actions Windows runner 實跑。

@@ -96,3 +96,28 @@
 - 已依 git-master 規則將 60 個變更檔案拆成 27 個英文 plain-style 原子提交，並推送至 `origin/main`，遠端最新提交為 `2c3912f`。
 - GitHub Actions CI run `33036030920` 全部通過：Node 22 format/lint/typecheck/test/build/npm audit、Go 1.25.x/1.26.x test/vet/build、govulncheck、gitleaks secret scan 與 Windows GUI linker build均成功。
 - CI 僅保留 actions/checkout、actions/setup-go 與 gitleaks 的 Node.js 20 deprecation annotation，屬非阻塞工作流程維護事項。
+
+## 2026-08-27：UI 自主疊代升級（合理性修正）
+
+- 使用者經 /ui-ux-pro-max 要求「自主疊代升級：UI 部分還有許多不合理之處，請找出並修正」；共識範圍＝缺陷級+UX 準則級+視覺級全部修正。
+- 使用者確認：破壞性操作（S3 Delete/SQL Exec，本機+遠端）採確認對話框；S3 物件列表可點擊自動填入 Object key（本機+遠端）納入。
+- 使用者回報「登入頁/SQL 表單欄位缺失」→ 診斷為共用元件 editorRow 窄視窗水平雙欄壓縮右欄（如 Secret key）缺陷；使用者選定「響應式堆疊」（<640dp 垂直堆疊）。
+- 發現並納入修正的既有 bug：Key passphrase 欄位未遮罩（密碼判定漏 passphrase）、表單按 Enter 無反應（Submit 設定但無人消費）、`ui.list` 三處共用導致滾動位置跨畫面污染。
+- 新增 `internal/gui/ui_upgrade.go`（純邏輯）與 `ui_upgrade_test.go`（20 個測試）：stripANSI/appendTerminalFilter（PTY ANSI 過濾+65536 rune 上限）、tailLines（輸出尾部 1000 行）、consumeSubmit/drainEditors（Enter 提交）、confirmation 狀態機（request/cancel/accept 防重）、normalizeDBType/applyDatabaseKind（MySQL/PostgreSQL 二元選擇，別名正規化）、useStackedRow（響應式堆疊）、isSecretHint、passwordReveal（Show/Hide）、buttonColors（busy 灰/danger 紅）、requireObjectKey/requireSQLStatement、objectsHeader、selectObject/selectRemoteObject、sendTerminalInput、try* 方法（SignIn/CreateVault/RotateRecovery/RemoteSignIn/SSHConnect 自 handle* 平移，行為不變）。
+- window.go 接線：八個獨立 layout.List（setup/profile/remote/terminal/storage/database/object/remoteObject）取代共用 ui.list；DB Type 自由文字改 dbTypeSelector 按鈕（setup+workspace）；破壞性操作經 requestConfirm modal（scrim/Cancel/Confirm，busy 時拒開、active 時攔截全部輸入）；upload/download/query 空值驗證；錯誤訊息移除 MaxLines=4 截斷；busy 時 material.Loader 動畫+按鈕變灰；輸出區改 outputList（滾動+自動貼底+GoMono 等寬字型+tailLines）；終端 appendTerminalFilter+stripANSI；profile 側欄空狀態；復原金鑰一鍵複製（clipboard.WriteCmd）；登出 busy guard；editorRow 響應式堆疊+isSecretHint 遮罩修正；Shaper 注入 gofont.Collection（含 Go Mono）。
+- remote_window.go 接線：remoteList 獨立；遠端 delete/exec 確認框；遠端物件點選；輸出區 outputList；logout「Signing out...」；tryRemoteSignIn；remoteAction 加 primary/danger。
+- i18n 新增 19 個 Key 英繁對稱（Cancel/Confirm/Delete object 與訊息/Execute SQL 與訊息/Show/Hide/Copy recovery key/Recovery key copied/No profiles/物件與 SQL 必填/SSH terminal is not connected/%d objects/Signing out/database type）；KeySQLBootstrap/KeyDatabaseRequired 移除 type 字樣對應 selector 化。
+- RED→GREEN 證據：三批測試（16+3+1 個）先以 undefined 編譯失敗確認 RED，實作後 `go test ./internal/gui -count=1` 全綠。
+- 最終回歸：全套 go test（排除本機 i18n）10 套件 ok、`go vet ./...` 0、`go build ./...` 0、gofmt clean；i18n 字典靜態對稱驗證（translations en/zh 各 87 keys、extra 各 74 keys、無差集）作為本機防毒限制的替代證據。
+- 未執行：本機 `internal/i18n` 測試（防毒隔離，交 GitHub CI）、Windows GUI linker build（避免產生 .exe 觸發防毒）、真實 PTY/S3/SQL 端到端操作、commit/push（待使用者要求）。
+
+## 2026-08-27：UI 升級提交與 CI 回歸修復
+
+- 使用者選定將 UI 疊代變更以原子提交推送並由 GitHub CI 驗證；預推本地驗證全綠（gofmt clean、go vet exit 0、go build exit 0、go test ./internal/gui ok）。
+- 依 git-master 建立 4 個英文 plain-style 原子提交：`f679527` Extend interface translations（17 個 i18n key）、`3d19864` Add interface upgrade helpers（ui_upgrade.go+test 新檔）、`1b618d4` Update local workspace interface（window.go+window_test.go）、`9ddcbf0` Update remote workspace interface；push `8fa9202..9ddcbf0` main→origin/main。
+- GitHub Actions run `33043969578` 失敗（RED）：Go 1.25.x/1.26.x 兩版本的 TestGUIStringsTranslateToTraditionalChinese 報 GUI string "SQL type, host, port, user, password, and database are required" was not translated；govulncheck、secret scan、Node 22 其餘 job 全綠，Windows GUI build 因前置失敗 skip。
+- 根因：`f679527` 將 KeySQLBootstrap 英文字典值改為不含 type 的新字串（對應 DB type selector 取代手填），但 internal/app/service.go:407 validateBootstrap SQL 分支仍回傳含 type 的舊字串，internal/i18n/i18n_test.go:87 反查清單亦未同步 → Text() 反查不到 → 測試失敗。
+- 修復採單一事實來源方案：service.go 與 i18n_test.go 同步為 "SQL host, port, user, password, and database are required"；bootstrap.DB.Type=="" 必填防禦檢查保留；GUI window.go:1615/window_test.go:234 早已使用同一新字串。
+- 本地替代驗證（i18n 測試依慣例交 GitHub Actions）：git grep 舊字串 0 殘留、新字串恰出現於字典英繁+service.go+window.go+window_test.go+i18n_test.go 五處；gofmt clean；go vet/go build exit 0；全套 go test（排除 internal/i18n）10 套件 ok。
+- 提交 `ad04369` Align translated validation messages（service.go+i18n_test.go 同一訊息契約的兩半不可分離故同體提交）並 push `9ddcbf0..ad04369`。
+- GitHub Actions run `33050084208` 全部通過：Go 1.25.x checks (1m7s)、Go 1.26.x checks (1m19s)、govulncheck (18s)、secret scan (8s)、Node 22 server checks (39s)、Windows GUI build (1m19s)；僅餘 actions 的 Node.js 20 deprecation annotation（非阻塞工作流程維護事項）。
