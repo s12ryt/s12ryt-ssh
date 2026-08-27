@@ -9,6 +9,7 @@ import (
 
 	coreapp "s12ryt-ssh/internal/app"
 	"s12ryt-ssh/internal/gui"
+	"s12ryt-ssh/internal/remote"
 	"s12ryt-ssh/internal/securestore"
 )
 
@@ -21,13 +22,15 @@ func main() {
 
 func run() error {
 	metadataPath, securestoreDir := applicationPaths()
+	secrets := securestore.NewDPAPIStoreAt(securestoreDir)
 	service := coreapp.NewService(
 		metadataPath,
-		securestore.NewDPAPIStoreAt(securestoreDir),
+		secrets,
 		coreapp.DefaultBackendFactory,
 	)
+	remoteService := remote.NewService(applicationRemotePreferencesPath(), secrets, nil)
 	window := new(gioapp.Window)
-	controller := gui.NewWindowWithPreferences(service, applicationPreferencesPath())
+	controller := gui.NewWindowWithServices(service, remoteService, applicationPreferencesPath())
 	result := make(chan error, 1)
 	go func() {
 		result <- controller.Run(window)
@@ -39,6 +42,11 @@ func run() error {
 func applicationPreferencesPath() string {
 	metadataPath, _ := applicationPaths()
 	return filepath.Join(filepath.Dir(metadataPath), "preferences.json")
+}
+
+func applicationRemotePreferencesPath() string {
+	metadataPath, _ := applicationPaths()
+	return filepath.Join(filepath.Dir(metadataPath), "remote-preferences.json")
 }
 
 func applicationPaths() (metadataPath, securestoreDir string) {

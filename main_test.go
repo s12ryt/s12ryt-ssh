@@ -28,3 +28,14 @@ func TestApplicationPreferencesUseSeparateNonSensitiveFile(t *testing.T) {
 		t.Fatalf("preferences path = %q, want %q", got, want)
 	}
 }
+
+func TestApplicationRemotePreferencesUseSeparateNonSensitiveFile(t *testing.T) {
+	metadataPath, _ := applicationPaths()
+	want := filepath.Join(filepath.Dir(metadataPath), "remote-preferences.json")
+	if got := applicationRemotePreferencesPath(); got != want {
+		t.Fatalf("remote preferences path = %q, want %q", got, want)
+	}
+	if got := applicationRemotePreferencesPath(); got == applicationPreferencesPath() || got == metadataPath {
+		t.Fatalf("remote preferences path %q must be separate from language preferences and vault metadata", got)
+	}
+}
