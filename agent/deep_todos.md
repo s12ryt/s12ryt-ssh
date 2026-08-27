@@ -69,3 +69,27 @@
 - README 補充 DPAPI、AES-GCM、HTTPS/TLS、最小權限帳號與憑證輪換安全注意事項，並加入 Cloudflare、AWS、MinIO、MySQL driver 與 pgx 官方參考連結。
 - 本次為純文件變更，未新增執行測試；以章節、欄位、連結人工檢查、敏感字串 pattern 檢查與 `git diff --check` 作替代驗證，均通過。
 - 本次未執行 commit 或 push，待使用者明確要求後再依 git-master 規則處理。
+
+## 2026-08-27：Telegram 身分驗證服務與遠端代理
+
+- 使用者要求依 `todos-auth-tgbot.md` 完整實作 Node.js 22 Telegram Bot 服務端、子帳號管理、身分校驗 port 與 Go GUI 第三種「登入校驗」入口。
+- 已確認服務端代理全部 S3/SQL 操作，不向子帳號或 Go 客戶端下發遠端連線憑證；權限粒度為 connection + operation。
+- 已確認 TypeScript/npm、Fastify v5、grammY long polling、Node 內建 SQLite/crypto、環境變數設定與自動 migration。
+- 已確認 Bot 由環境變數 Telegram user IDs 管理，支援繁中/英文、按鈕與 slash commands、完整帳號/連線/權限/session/稽核管理。
+- 已確認 Go GUI 保留本機 Vault 流程並增加獨立遠端工作區；URL/account 保存為非敏感偏好，refresh token 使用 Windows DPAPI，密碼不保存。
+- 已確認 access/refresh、裝置上限、反向代理 HTTPS、固定 bucket/prefix/database 邊界、可配置保守代理限制與安全 metadata 稽核契約。
+- 已以 TDD 完成 Node config、crypto、SQLite transaction migration、repository、account/session/connection/grant/audit services。
+- 已完成 Fastify `/api/v1`、HTTPS/trusted proxy guard、rate limit、opaque access/rotation refresh、S3/SQL permission proxy 與安全 metadata audit。
+- 已完成 AWS SDK v3 S3 adapter、mysql2/pg SQL adapter，涵蓋 paginator、streaming、固定 bucket/prefix/database、read-only query、timeout、row/byte limit。
+- 已完成繁中/英文 BotController 與 grammY private-chat adapter，支援 account、connection wizard、grant、session、audit 與敏感 incoming message best-effort delete。
+- Bot connection 清單已提供 inline S3/MySQL/PostgreSQL 新增按鈕，與 slash commands 共用同一精靈；繁中帳號、裝置、工作階段、connection 與 audit 動態狀態已完成本地化。
+- inline 精靈與繁中動態文案先由 2 個回歸測試取得預期 RED，再完成狀態機、鍵盤與翻譯修正；重設密碼回覆的 `session` 混用亦先新增失敗斷言後修正為「工作階段」。
+- 已完成 Node runtime/index、audit retention、HTTP/Bot 啟動、SIGINT/SIGTERM graceful shutdown 與聚合資源清理；Node typecheck、lint、build 與 42 項測試通過。
+- 已以 TDD 新增 Go `internal/remote`：URL 驗證、非敏感 preferences、DPAPI refresh token、token rotation/reuse response、S3 streaming 與 SQL proxy client。
+- 已完成 Gio 第三種「登入校驗」、獨立遠端 S3/SQL workspace、grant-aware controls、無 SSH/無 secret editor，以及 main 的 remote service 注入。
+- 已修復 SQL JSON contract：nil parameters 使用 `omitempty`，避免 Fastify schema 收到 `null`。
+- CI 已加入 Node 22 format/lint/typecheck/test/build/npm audit job；README 與 `server/README.md` 已補上部署、Bot、API、HTTPS與安全文件，並說明 inline 與 slash command 兩種精靈入口。
+- 最終 Node 驗證通過：`npm run format:check`、`npm run lint`、`npm run typecheck`、`npm test`（42/42）、`npm run build`、`npm audit --omit=dev --audit-level=high`（0 vulnerabilities）。
+- 最終 Go 驗證明確排除本機 `internal/i18n` 測試後，root、app、config、database、gui、remote、securestore、ssh、storage、vault 全數通過；`go vet` 與 `go build` 對同一組專案 package 通過。
+- CI YAML/README 可由 Prettier 解析，`git diff --check` 無 whitespace error，server runtime 資料與 SQLite 檔案可被 `.gitignore` 排除，TUI dependency 與常見憑證 pattern 檢查均無命中。
+- 本機仍未執行 `internal/i18n` package tests；本次未推送，因此 GitHub CI 尚未驗證這批變更；真實 Telegram、S3、MySQL/PostgreSQL 服務整合與最新 Windows GUI linker build亦未執行。

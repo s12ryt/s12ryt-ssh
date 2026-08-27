@@ -62,3 +62,28 @@
 - 新增 MySQL/MariaDB 與 PostgreSQL 設定參考；記錄 MySQL `TLSMode` 預設 `true`、PostgreSQL `SSLMode` 預設 `require`、安全模式差異，以及 SQL Vault 所需 schema 和權限。
 - 文件明確列出目前未支援的 STS session token、自訂 CA 欄位、Unix socket、內建 SSH tunnel 與額外 DSN query parameter，避免使用者依文件設定不存在的功能。
 - README 驗證：章節與欄位 grep 通過，常見 access key/token/private key pattern 未命中，`git diff --check` 通過；本次未執行 go test，也未執行 Git commit/push。
+
+## Telegram 身分驗證服務需求
+
+- 讀取 `todos-auth-tgbot.md`，確認新需求包含 Node.js 22 Telegram Bot、S3/SQL connection 管理、子帳號、身份校驗 port 與 Go GUI 第三種登入方式。
+- 使用者確認完整實作；已完成服務代理模式、權限粒度、Telegram 管理員來源、long polling、SQLite、TypeScript/npm、session、GUI 遠端工作區、Bot 管理範圍與稽核的多輪需求澄清。
+- 使用 Context7 查核 Fastify v5 完整 JSON Schema/plugin/inject、grammY long polling/private chat/inline keyboard/i18n，以及 Node 22 `node:sqlite` 與 crypto API。
+- 技術契約已寫入 `agent/question.md`；正式程式尚未修改，下一步從 server domain/security 的 RED 測試開始。
+
+## Telegram 身分驗證服務實作
+
+- 建立 `server/` Node 22 TypeScript 專案、strict TypeScript/ESLint/Prettier、`.env.example` 與 npm lock；production dependency audit 初始為 0 vulnerabilities。
+- 依 RED -> GREEN 完成 config、scrypt/AES-GCM/token crypto、Node SQLite transaction migration、repository、AdminService、AuthService、Fastify API、S3/SQL ProxyService 與真實 adapters。
+- Bot 測試先因 controller/adapter 不存在而 RED；後完成私聊/admin allowlist、繁中/英文、inline menu、slash commands、connection wizard、grant/session/audit 與敏感訊息 best-effort delete。
+- 品質覆核新增 inline connection wizard 與繁中動態狀態測試；第一次執行為 40/42，分別因 connection menu 無 keyboard 及 `disabled | devices=2` 未翻譯而 RED。完成 callback、keyboard、wizard name state 與動態 label 後 42/42 GREEN。
+- 另新增繁中重設密碼回覆不得含 `session` 的回歸斷言；第一次精準失敗於「所有既有 session 已撤銷」，修正為「所有既有工作階段已撤銷」後目標與全套 Node 測試通過。
+- Runtime/index 測試先因 module 不存在而 RED；後完成 production dependency composition、health、audit cleanup、HTTP/Bot 啟動、polling failure、訊號 shutdown、冪等/聚合 close。Node 最終 42 tests、typecheck、lint、build 通過。
+- Go `internal/remote` 分四輪 TDD 完成 URL/preferences、login/refresh/logout、S3/SQL proxy 與 service/device ID；目標測試與 `go vet ./internal/remote` 通過。
+- Gio model/window 測試先 RED，再加入 remote login/workspace screens、assigned resource/grant filtering、S3/SQL代理操作、DPAPI restore/logout及繁中/英文文案；`go test ./internal/gui -count=1` 通過。
+- `main.go` 新增獨立 `remote-preferences.json` 與 remote service 注入；root target test通過。SQL nil parameters regression先 RED，再以 `omitempty` 修復並通過 remote tests。
+- `.github/workflows/ci.yml` 新增 Node 22 job；根 `.gitignore` 排除 server `.env`、`node_modules`、`dist`、`data` 與 SQLite檔案。
+- 新增 `server/README.md`，根 README加入遠端登入入口、Node啟動、安全模型與本機資料說明；server 文件已補充 inline S3/MySQL/PostgreSQL 按鈕與 slash commands 共用精靈。
+- 最終 Node 驗證：format check、ESLint、TypeScript typecheck、42/42 tests、build 全通過；production npm audit 為 0 vulnerabilities。測試只有 Node `node:sqlite` experimental warning。
+- 最終 Go 驗證：未執行本機 `internal/i18n` package test；其餘專案 package 測試全綠，並通過對同一 package 集合的 `go vet`、`go build`。
+- 安全與文件驗證：server source 無 TODO/FIXME/not implemented；常見 AWS/GitHub/Slack/private-key pattern 無命中；`git diff --check` 無 whitespace error；README/CI YAML 可由 Prettier 解析；無舊 TUI 依賴。
+- 本輪未執行 Git commit/push，因此新 Node/Go 功能尚未由 GitHub Actions 驗證；未連線真實 Telegram、S3、MySQL/PostgreSQL，亦未重新產生 Windows GUI linker build。
