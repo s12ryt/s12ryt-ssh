@@ -1,12 +1,15 @@
 package gui
 
 import (
+	"bytes"
 	"context"
+	"io"
 	"path/filepath"
 	"testing"
 
 	"s12ryt-ssh/internal/app"
 	"s12ryt-ssh/internal/config"
+	"s12ryt-ssh/internal/remote"
 	"s12ryt-ssh/internal/securestore"
 	"s12ryt-ssh/internal/storage"
 	"s12ryt-ssh/internal/vault"
@@ -25,6 +28,90 @@ func TestNewModelChoosesSetupOrLogin(t *testing.T) {
 	}
 	if model.AccountName != "alice" {
 		t.Fatalf("account name: %q", model.AccountName)
+	}
+}
+
+type fakeRemoteSession struct {
+	logoutCount int
+}
+
+func (s *fakeRemoteSession) Account() remote.Account {
+	return remote.Account{ID: "account-1", Username: "remote-alice"}
+}
+
+func (s *fakeRemoteSession) Resources(context.Context) ([]remote.Resource, error) {
+	return nil, nil
+}
+
+func (s *fakeRemoteSession) ListObjects(context.Context, string, string) ([]remote.S3Object, error) {
+	return nil, nil
+}
+
+func (s *fakeRemoteSession) UploadObject(context.Context, string, string, io.ReadSeeker, int64) (remote.UploadResult, error) {
+	return remote.UploadResult{}, nil
+}
+
+func (s *fakeRemoteSession) DownloadObject(context.Context, string, string) (remote.Download, error) {
+	return remote.Download{Body: io.NopCloser(bytes.NewReader(nil))}, nil
+}
+
+func (s *fakeRemoteSession) DeleteObject(context.Context, string, string) error {
+	return nil
+}
+
+func (s *fakeRemoteSession) Tables(context.Context, string) ([]string, error) {
+	return nil, nil
+}
+
+func (s *fakeRemoteSession) Query(context.Context, string, string, []any) (remote.SQLQueryResult, error) {
+	return remote.SQLQueryResult{}, nil
+}
+
+func (s *fakeRemoteSession) Exec(context.Context, string, string, []any) (remote.SQLExecResult, error) {
+	return remote.SQLExecResult{}, nil
+}
+
+func (s *fakeRemoteSession) Logout(context.Context) error {
+	s.logoutCount++
+	return nil
+}
+
+func TestModelRemoteWorkspaceExcludesSSHAndReturnsToOriginalScreen(t *testing.T) {
+	missing := app.NewService(filepath.Join(t.TempDir(), "metadata.json"), securestore.NewMemoryStore(), nil)
+	model := NewModelWithRemote(missing, nil)
+	model.BeginRemoteLogin()
+	if model.Screen != ScreenRemoteLogin {
+		t.Fatalf("remote login screen = %v", model.Screen)
+	}
+
+	session := &fakeRemoteSession{}
+	model.SetRemoteSession(session)
+	if model.Screen != ScreenRemoteWorkspace || model.Tab != TabStorage || model.RemoteAccountName != "remote-alice" {
+		t.Fatalf("remote workspace state = %+v", model)
+	}
+	model.SelectTab(TabSSH)
+	if model.Tab != TabStorage {
+		t.Fatalf("remote workspace accepted SSH tab: %v", model.Tab)
+	}
+	model.SelectTab(TabDatabase)
+	if model.Tab != TabDatabase {
+		t.Fatalf("remote database tab = %v", model.Tab)
+	}
+	if err := model.LogoutRemote(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if session.logoutCount != 1 || model.Screen != ScreenSetup || model.RemoteSession != nil {
+		t.Fatalf("remote logout state = %+v, logout count = %d", model, session.logoutCount)
+	}
+}
+
+func TestModelCancelsRemoteLoginBackToConfiguredLocalLogin(t *testing.T) {
+	service, _ := registeredService(t)
+	model := NewModelWithRemote(service, nil)
+	model.BeginRemoteLogin()
+	model.CancelRemoteLogin()
+	if model.Screen != ScreenLogin || model.AccountName != "alice" {
+		t.Fatalf("cancel remote login state = %+v", model)
 	}
 }
 
