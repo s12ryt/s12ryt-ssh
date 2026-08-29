@@ -139,3 +139,7 @@
 - README/ci.yml 調整以主倉庫 server 的 prettier 驗證通過；提交 blob 經 cat-file 驗證為純 LF。
 - 主倉庫依 git-master 建立 4 個功能提交：c9348e2 Remove authentication server directory（34 檔案）、25d606c Drop Node server checks from CI、3d08475 Point documentation to the auth server repository（7 處指向新倉庫）、3dcac97 Remove server ignore rules；外加 2 個紀錄提交 019521d/5fc9065 與本輪紀錄提交。
 - 待驗證：兩倉庫 GitHub Actions CI 結果（推送後檢查）；worktree F:\Project\ssh\s12ryt-auth-server 於驗證後移除。
+- CI 驗證結果：主倉庫 run 33229213719 全部通過（Go 1.25.x/1.26.x test/vet/build、Windows GUI build、govulncheck、secret scan），node-checks job 已不存在。
+- 新倉庫首次 push run 33228963820：Node 22 checks 通過，但 secret scan 因 gitleaks-action 對「根提交為範圍起點」的已知邊界情況失敗（`root^..HEAD` 無效，與主倉庫首次推送 run 33000245056 完全同型；非真實洩漏）。
+- 修復：新倉庫提交 daa3cb1 Allow manual CI runs（CI 加 workflow_dispatch 觸發，prettier 驗證通過）並推送；push run 33229463300 全綠；手動 dispatch run 33229593777 完成 17 commits / 295 KB 全歷史掃描，no leaks found。
+- 收尾：worktree F:\Project\ssh\s12ryt-auth-server 已移除、本地 server-split 分支已刪除、主倉庫 remote 清理；新倉庫 main 最終為 daa3cb1（17 個提交）。

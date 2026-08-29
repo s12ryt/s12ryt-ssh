@@ -130,3 +130,4 @@
   - 主倉庫：git rm -r server（並清除殘留 node_modules/dist/data）、移除 CI node-checks job、README 7 處改連結、.gitignore 刪 server 區塊；提交 c9348e2、25d606c、3d08475、3dcac97。
   - prettier 驗證：worktree 的 ci.yml/README.md 通過（README 曾因編輯工具寫入 CRLF 而本地檢查失敗，正規化 LF 後通過；提交 blob 經 cat-file 驗證 CR=0）。
 - 待辦：推送 origin main 後驗證兩倉庫 CI；移除 worktree 與 server-split 分支。
+- CI 驗證與收尾：主倉庫 run 33229213719 成功；新倉庫 secret scan 首次失敗屬 gitleaks 根提交範圍邊界（對照主倉庫 run 33000245056 同型），以 daa3cb1 Allow manual CI runs（workflow_dispatch 觸發）修復，push run 33229463300 與手動 dispatch run 33229593777（全歷史 17 commits 掃描、無洩漏）均成功；prettier 驗證改以 npx prettier@3 完成（server/node_modules 已隨目錄刪除）；worktree 與 server-split 分支已清理。
