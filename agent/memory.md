@@ -118,3 +118,15 @@
 - 寫入：agent/deep_todos.md、agent/memory.md 各一段審查紀錄；未修改任何正式程式碼。
 - 暫存檔操作：在 C:\Users\yoyo2\AppData\Local\Temp\opencode\bodylimit-repro\repro.mjs 建立 Fastify bodyLimit 實證腳本，短暫複製為 server/.repro-bodylimit.mjs 執行（結論：octet-stream 串流上傳不受 app bodyLimit 限制）後已刪除，server 目錄無殘留。
 - git：無 commit/push；工作樹在更新 agent 紀錄前為乾淨。
+
+## 2026-08-29：server 拆分為獨立倉庫（檔案操作）
+
+- 讀取：.github/workflows/ci.yml、.gitignore、agent/question.md、項目表.md 全文；git log 提交風格確認（英文 PLAIN + Sisyphus footer）。
+- 寫入：agent/question.md（拆分需求與驗收）、agent/項目表.md（server 段落改為獨立倉庫說明、CI/文件/依賴方向更新）、agent/deep_todos.md、agent/memory.md。
+- Git 操作（GIT_MASTER=1）：
+  - 紀錄提交：019521d Record server review findings、5fc9065 Record repository split requirements。
+  - `git subtree split -P server -b server-split`；`git worktree add ..\s12ryt-auth-server server-split`。
+  - worktree 內 3 個提交（bdae7de/b01e2ee/0c9044d），建立 GitHub 倉庫 s12ryt/s12ryt-ssh-auth-server（公開、無 autoInit），`git push auth-server server-split:main` 成功。
+  - 主倉庫：git rm -r server（並清除殘留 node_modules/dist/data）、移除 CI node-checks job、README 7 處改連結、.gitignore 刪 server 區塊；提交 c9348e2、25d606c、3d08475、3dcac97。
+  - prettier 驗證：worktree 的 ci.yml/README.md 通過（README 曾因編輯工具寫入 CRLF 而本地檢查失敗，正規化 LF 後通過；提交 blob 經 cat-file 驗證 CR=0）。
+- 待辦：推送 origin main 後驗證兩倉庫 CI；移除 worktree 與 server-split 分支。

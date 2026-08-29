@@ -130,3 +130,12 @@
 - 審查結論：無重大或高風險缺陷。提出 6 項非必要建議：token/session/refresh_history 表無限期成長（audit 有每日清理但 token 表沒有）、login 帳號不存在時跳過 scrypt 的計時側通道、Bot /connection_test 無逾時、runtime 把 audit cleanup 錯誤路由到 onBotError 會導致整個服務關閉、TRUSTED_PROXIES CIDR 格式未驗證、wizard 敏感值 trim。
 - 正向確認：分層架構乾淨、SQL 全面 prepared statements、session 建立/輪換皆在 transaction、refresh reuse 撤銷整個 family、S3 key `..` 防護、上傳下載雙重 byte 上限、稽核僅存 statement hash、敏感 wizard 訊息 best-effort 刪除屬實。
 - 未連線真實 Telegram、S3、MySQL/PostgreSQL；本輪無程式碼或文件變更，僅更新 agent 紀錄。
+
+## 2026-08-29：server 拆分為獨立倉庫
+
+- 使用者確認：以 `git subtree split -P server` 保留完整歷史，拆分至公開新倉庫 `s12ryt/s12ryt-ssh-auth-server`；主倉庫移除 `server/` 目錄、CI 的 node-checks job、README 與 .gitignore 的 server 條目，並立即提交推送。
+- split 產生 13 個歷史提交（811f9d2..3ec0607 對應新 SHA），調整前驗證 `git diff server-split main:server` 為空（tree 完全一致）。
+- 新倉庫在 split 歷史上加 3 個調整提交：bdae7de Adapt README for standalone repository、b01e2ee Add Node CI workflow（Node 22 checks + secret scan，移除 working-directory）、0c9044d Add repository ignore rules；新倉庫 main 推送成功（HEAD 0c9044d）。
+- README/ci.yml 調整以主倉庫 server 的 prettier 驗證通過；提交 blob 經 cat-file 驗證為純 LF。
+- 主倉庫依 git-master 建立 4 個功能提交：c9348e2 Remove authentication server directory（34 檔案）、25d606c Drop Node server checks from CI、3d08475 Point documentation to the auth server repository（7 處指向新倉庫）、3dcac97 Remove server ignore rules；外加 2 個紀錄提交 019521d/5fc9065 與本輪紀錄提交。
+- 待驗證：兩倉庫 GitHub Actions CI 結果（推送後檢查）；worktree F:\Project\ssh\s12ryt-auth-server 於驗證後移除。
