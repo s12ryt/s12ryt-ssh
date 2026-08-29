@@ -143,3 +143,21 @@
 - 新倉庫首次 push run 33228963820：Node 22 checks 通過，但 secret scan 因 gitleaks-action 對「根提交為範圍起點」的已知邊界情況失敗（`root^..HEAD` 無效，與主倉庫首次推送 run 33000245056 完全同型；非真實洩漏）。
 - 修復：新倉庫提交 daa3cb1 Allow manual CI runs（CI 加 workflow_dispatch 觸發，prettier 驗證通過）並推送；push run 33229463300 全綠；手動 dispatch run 33229593777 完成 17 commits / 295 KB 全歷史掃描，no leaks found。
 - 收尾：worktree F:\Project\ssh\s12ryt-auth-server 已移除、本地 server-split 分支已刪除、主倉庫 remote 清理；新倉庫 main 最終為 daa3cb1（17 個提交）。
+
+## 2026-08-29：移除本機 Vault，全面遠端登入，新增遠端 SSH 主機
+
+- 使用者需求：移除 S3 相容+SQL 本機 Vault，App 改為全面遠端登入，並新增遠端 SSH 主機管理；需求契約見 agent/question.md 對應章節。
+- 服務端（s12ryt-ssh-auth-server，5 個提交推送至 main=68d732d，CI run 33239399313 success，全量 67/67 測試綠）：
+  - `147a0c0` migration v2（ssh_hosts 表、accounts.ssh_enabled、audit_events.ssh_host_id）與 domain models。
+  - `1195519` SSH host repository 與 service（CRUD、憑證下發 AES-256-GCM、每帳號上限 50、稽核五 action、host/port 變更重置 fingerprint）。
+  - `e5c7994` HTTP SSH hosts API（6 條 routes）與 /resources sshEnabled 欄位；runtime 組裝 SSHHostService。
+  - `6b100ad` Bot /ssh_enable、/ssh_disable 指令；account_list 顯示 ssh=on/off。
+  - `68d732d` README 文件更新。
+- 主倉庫（5 個提交推送至 main=2f67070，CI run 33241097108 全綠）：
+  - `ff1f9cf` internal/ssh 支援 KeyData 私鑰內容（3 新測試）。
+  - `19fa791` internal/remote SSH hosts API client（SSHHosts/Create/Update/Delete/Credentials/SetFingerprint 與 ResourcesOverview，3 新測試）。
+  - `2a3fd03` 移除本機 Vault（internal/{app,vault,storage,database} 刪除；GUI 重構為遠端唯一入口；新增遠端 SSH GUI remote_ssh.go：hosts 列表/CRUD/TOFU fingerprint 確認/PTY 終端；main.go 簡化；go.mod 清 aws-sdk/mysql/pgx/sqlite；26 檔案 +871/-4739）。
+  - `8a7b53d` i18n 字典重寫（單 translations map、清 60+ 死字串、新增 SSH 字串）與 README 重寫（純遠端架構）。
+  - `2f67070` 修正 i18n 測試（SSH、S3 / R2 專有名詞不翻譯屬正確行為）。
+- TDD 證據：服務端各週期 RED→GREEN（migration 2 測試、ssh-host-service 14、http-ssh-api 7、bot 2）；主倉庫 KeyData 3 測試 RED（unknown field KeyData）→綠、remote client 3 測試 RED（undefined 方法）→綠、GUI remote_ssh 6 測試 RED→綠、i18n 重寫經 CI 驗證綠。
+- 事故與修復：主倉庫首次 push run 33240969975 i18n 測試要求專有名詞翻譯→刪 2 條 sources（2f67070）；首次 commit 曾混入 staged 刪除檔案→reset 重提。

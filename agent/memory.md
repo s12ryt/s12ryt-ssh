@@ -131,3 +131,13 @@
   - prettier 驗證：worktree 的 ci.yml/README.md 通過（README 曾因編輯工具寫入 CRLF 而本地檢查失敗，正規化 LF 後通過；提交 blob 經 cat-file 驗證 CR=0）。
 - 待辦：推送 origin main 後驗證兩倉庫 CI；移除 worktree 與 server-split 分支。
 - CI 驗證與收尾：主倉庫 run 33229213719 成功；新倉庫 secret scan 首次失敗屬 gitleaks 根提交範圍邊界（對照主倉庫 run 33000245056 同型），以 daa3cb1 Allow manual CI runs（workflow_dispatch 觸發）修復，push run 33229463300 與手動 dispatch run 33229593777（全歷史 17 commits 掃描、無洩漏）均成功；prettier 驗證改以 npx prettier@3 完成（server/node_modules 已隨目錄刪除）；worktree 與 server-split 分支已清理。
+
+## 2026-08-29：移除本機 Vault 與遠端 SSH（檔案操作）
+
+- 讀取：主倉庫 internal/{app,config,database,gui,i18n,remote,securestore,ssh} 全部關鍵檔與測試、main.go/main_test.go、go.mod、README.md；服務端倉庫（clone 至 F:\Project\ssh\s12ryt-auth-server）src 與 test 全部 17+9 檔。
+- 寫入：服務端 src/{db/database.ts,domain/models.ts,repository/sqlite-repository.ts,services/{admin-service.ts,ssh-host-service.ts},http/app.ts,runtime.ts,bot/controller.ts}、test/{database,ssh-host-service,http-ssh-api,http-api,bot-controller}.test.ts、README.md；主倉庫 internal/{config/config.go,ssh/{auth,client,client_test}.go,remote/{auth.go,models.go,ssh_test.go},gui/{model,model_test,window,window_test,remote_window,ui_upgrade,ui_upgrade_test,remote_ssh,remote_ssh_test}.go,i18n/{i18n,i18n_test}.go}、main.go/main_test.go、README.md、agent/question.md、agent 三紀錄檔。
+- 刪除：internal/{app,vault,storage,database} 四個 package（git rm）；GUI 本機畫面（Setup/Login/Recovery/Workspace）與 vault 相關程式碼以整檔重寫移除；i18n 字典 60+ 死字串。
+- go.mod/go.sum：tidy 清除 aws-sdk-go-v2、go-sql-driver/mysql、pgx、modernc.org/sqlite（-28/-98 行）。
+- git（GIT_MASTER=1）：主倉庫 5 提交（ff1f9cf/19fa791/2a3fd03/8a7b53d/2f67070）推送；服務端 5 提交（147a0c0/1195519/e5c7994/6b100ad/68d732d）推送。
+- CI：主倉庫 run 33241097108 全綠（修復 33240969975 的 i18n 專有名詞斷言）；服務端 run 33239399313 success。
+- 驗證：兩倉庫本地測試全綠（internal/i18n 除外——本機防毒誤判 fork/exec，交 CI）；go vet ./...、go build ./...、npm typecheck/lint/build 全綠。
