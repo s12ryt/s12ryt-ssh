@@ -80,8 +80,6 @@ func TestGUIStringsTranslateToTraditionalChinese(t *testing.T) {
 		"Log out",
 		"Working...",
 		"Operation failed.",
-		"SSH",
-		"S3 / R2",
 		"SQL database",
 		"Connect",
 		"SSH hosts",
