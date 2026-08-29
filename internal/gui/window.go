@@ -31,10 +31,27 @@ var (
 	colorBackground = color.NRGBA{R: 13, G: 18, B: 22, A: 255}
 	colorSurface    = color.NRGBA{R: 23, G: 31, B: 37, A: 255}
 	colorSurface2   = color.NRGBA{R: 31, G: 42, B: 48, A: 255}
+	colorEdge       = color.NRGBA{R: 38, G: 52, B: 60, A: 255}
 	colorTeal       = color.NRGBA{R: 55, G: 220, B: 177, A: 255}
 	colorText       = color.NRGBA{R: 232, G: 244, B: 241, A: 255}
 	colorMuted      = color.NRGBA{R: 157, G: 178, B: 174, A: 255}
 	colorDanger     = color.NRGBA{R: 255, G: 116, B: 124, A: 255}
+)
+
+// Design tokens keep spacing and sizing consistent across every view. The
+// rhythm sticks to a 4dp base scale: 4 / 8 / 12 / 16 / 20 / 24 / 32.
+const (
+	labelTextSize       = 12
+	fieldGap            = 4
+	rowGap              = 8
+	sectionGap          = 12
+	cardGap             = 16
+	cardPadding         = 20
+	cardPaddingLoose    = 28
+	pagePadding         = 24
+	loginCardWidth      = 440
+	surfaceCornerRadius = 10
+	privateKeyMinHeight = 88
 )
 
 // Window is the Gio presentation layer for the application.
@@ -44,6 +61,7 @@ type Window struct {
 	theme           *material.Theme
 	ops             op.Ops
 	remoteList      layout.List
+	sshFormList     layout.List
 	terminalList    layout.List
 	language        i18n.Language
 	preferencesPath string
@@ -318,8 +336,8 @@ func (ui *Window) requestConfirm(title, message string, action func()) {
 
 func (ui *Window) layout(gtx layout.Context) {
 	paint.Fill(gtx.Ops, colorBackground)
-	layout.Inset{Top: unit.Dp(24), Bottom: unit.Dp(24), Left: unit.Dp(28), Right: unit.Dp(28)}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
-		return layout.Flex{Axis: layout.Vertical, Gap: gtx.Dp(16)}.Layout(gtx,
+	layout.Inset{Top: unit.Dp(pagePadding), Bottom: unit.Dp(pagePadding), Left: unit.Dp(pagePadding), Right: unit.Dp(pagePadding)}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+		return layout.Flex{Axis: layout.Vertical, Gap: gtx.Dp(cardGap)}.Layout(gtx,
 			layout.Rigid(func(gtx layout.Context) layout.Dimensions { return ui.header(gtx) }),
 			layout.Flexed(1, func(gtx layout.Context) layout.Dimensions { return ui.content(gtx) }),
 		)
@@ -362,7 +380,8 @@ func (ui *Window) confirmDialog(gtx layout.Context) layout.Dimensions {
 					return message.Layout(gtx)
 				}),
 				layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-					return layout.Flex{Axis: layout.Horizontal, Gap: gtx.Dp(8)}.Layout(gtx,
+					return layout.Flex{Axis: layout.Horizontal, Gap: gtx.Dp(rowGap)}.Layout(gtx,
+						layout.Flexed(1, func(gtx layout.Context) layout.Dimensions { return layout.Dimensions{} }),
 						layout.Rigid(func(gtx layout.Context) layout.Dimensions {
 							return ui.button(gtx, &ui.confirmCancelBtn, "Cancel", false)
 						}),
@@ -377,13 +396,18 @@ func (ui *Window) confirmDialog(gtx layout.Context) layout.Dimensions {
 }
 
 func (ui *Window) header(gtx layout.Context) layout.Dimensions {
-	return layout.Flex{Axis: layout.Horizontal, Alignment: layout.Middle, Gap: gtx.Dp(12)}.Layout(gtx,
+	return layout.Flex{Axis: layout.Horizontal, Alignment: layout.Middle, Gap: gtx.Dp(sectionGap)}.Layout(gtx,
 		layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-			return material.H4(ui.theme, "s12ryt SSH").Layout(gtx)
+			return layout.Flex{Axis: layout.Vertical, Gap: gtx.Dp(2)}.Layout(gtx,
+				layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+					return material.H5(ui.theme, "s12ryt SSH").Layout(gtx)
+				}),
+				layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+					return ui.fieldLabel(gtx, "Secure remote workspace")
+				}),
+			)
 		}),
-		layout.Flexed(1, func(gtx layout.Context) layout.Dimensions {
-			return material.Body2(ui.theme, ui.text("Secure remote workspace")).Layout(gtx)
-		}),
+		layout.Flexed(1, func(gtx layout.Context) layout.Dimensions { return layout.Dimensions{} }),
 		layout.Rigid(func(gtx layout.Context) layout.Dimensions {
 			return ui.button(gtx, &ui.languageButton, i18n.T(ui.language, i18n.KeyLanguageToggle), false)
 		}),
@@ -439,6 +463,24 @@ func (ui *Window) secretLabel(gtx layout.Context, text string) layout.Dimensions
 	return style.Layout(gtx)
 }
 
+// fieldLabel renders the small muted caption that keeps a filled-in editor
+// identifiable after its placeholder hint disappears.
+func (ui *Window) fieldLabel(gtx layout.Context, label string) layout.Dimensions {
+	style := material.Label(ui.theme, unit.Sp(labelTextSize), ui.text(label))
+	style.Color = colorMuted
+	return style.Layout(gtx)
+}
+
+// labeledField pairs a visible caption with an editor field.
+func (ui *Window) labeledField(gtx layout.Context, editor *widget.Editor, hint string, singleLine, password bool) layout.Dimensions {
+	return layout.Flex{Axis: layout.Vertical, Gap: gtx.Dp(fieldGap)}.Layout(gtx,
+		layout.Rigid(func(gtx layout.Context) layout.Dimensions { return ui.fieldLabel(gtx, hint) }),
+		layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+			return ui.field(gtx, editor, hint, singleLine, password)
+		}),
+	)
+}
+
 func (ui *Window) field(gtx layout.Context, editor *widget.Editor, hint string, singleLine, password bool) layout.Dimensions {
 	if editor == nil {
 		return layout.Dimensions{}
@@ -486,21 +528,21 @@ func (ui *Window) revealFor(editor *widget.Editor) *editorReveal {
 
 func (ui *Window) editorRow(gtx layout.Context, left string, leftEditor *widget.Editor, right string, rightEditor *widget.Editor) layout.Dimensions {
 	leftField := func(gtx layout.Context) layout.Dimensions {
-		return ui.field(gtx, leftEditor, left, true, isSecretHint(left))
+		return ui.labeledField(gtx, leftEditor, left, true, isSecretHint(left))
 	}
 	rightField := func(gtx layout.Context) layout.Dimensions {
 		if rightEditor == nil {
 			return layout.Dimensions{}
 		}
-		return ui.field(gtx, rightEditor, right, true, isSecretHint(right))
+		return ui.labeledField(gtx, rightEditor, right, true, isSecretHint(right))
 	}
 	if useStackedRow(int(float32(gtx.Constraints.Max.X) / gtx.Metric.PxPerDp)) {
-		return layout.Flex{Axis: layout.Vertical, Gap: gtx.Dp(6)}.Layout(gtx,
+		return layout.Flex{Axis: layout.Vertical, Gap: gtx.Dp(sectionGap)}.Layout(gtx,
 			layout.Rigid(leftField),
 			layout.Rigid(rightField),
 		)
 	}
-	return layout.Flex{Axis: layout.Horizontal, Gap: gtx.Dp(10)}.Layout(gtx,
+	return layout.Flex{Axis: layout.Horizontal, Gap: gtx.Dp(sectionGap)}.Layout(gtx,
 		layout.Flexed(1, leftField),
 		layout.Flexed(1, rightField),
 	)
@@ -542,6 +584,18 @@ func (ui *Window) actionButton(gtx layout.Context, click *widget.Clickable, text
 	return style.Layout(gtx)
 }
 
+// buttonBlock stretches a secondary button to the full width of its slot.
+func (ui *Window) buttonBlock(gtx layout.Context, click *widget.Clickable, text string, primary bool) layout.Dimensions {
+	gtx.Constraints.Min.X = gtx.Constraints.Max.X
+	return ui.button(gtx, click, text, primary)
+}
+
+// actionButtonBlock stretches an operation button to the full width of its slot.
+func (ui *Window) actionButtonBlock(gtx layout.Context, click *widget.Clickable, text string, primary, danger bool) layout.Dimensions {
+	gtx.Constraints.Min.X = gtx.Constraints.Max.X
+	return ui.actionButton(gtx, click, text, primary, danger)
+}
+
 // outputList renders scrollable operation output that sticks to the bottom as
 // new content arrives, bounded to the most recent lines.
 func (ui *Window) outputList(gtx layout.Context, list *layout.List, content, hint string, mono bool) layout.Dimensions {
@@ -565,9 +619,14 @@ func (ui *Window) outputList(gtx layout.Context, list *layout.List, content, hin
 	})
 }
 
+// surface draws a rounded card with a hairline edge so panels read as
+// elevated layers over the page background.
 func (ui *Window) surface(gtx layout.Context, child layout.Widget) layout.Dimensions {
-	defer clip.UniformRRect(image.Rect(0, 0, gtx.Constraints.Max.X, gtx.Constraints.Max.Y), 8).Push(gtx.Ops).Pop()
-	paint.Fill(gtx.Ops, colorSurface)
+	bounds := image.Rect(0, 0, gtx.Constraints.Max.X, gtx.Constraints.Max.Y)
+	rrect := clip.UniformRRect(bounds, surfaceCornerRadius)
+	paint.FillShape(gtx.Ops, colorSurface, rrect.Op(gtx.Ops))
+	stroke := clip.Stroke{Path: rrect.Path(gtx.Ops), Width: 1}
+	paint.FillShape(gtx.Ops, colorEdge, stroke.Op())
 	return child(gtx)
 }
 
