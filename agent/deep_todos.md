@@ -121,3 +121,12 @@
 - 本地替代驗證（i18n 測試依慣例交 GitHub Actions）：git grep 舊字串 0 殘留、新字串恰出現於字典英繁+service.go+window.go+window_test.go+i18n_test.go 五處；gofmt clean；go vet/go build exit 0；全套 go test（排除 internal/i18n）10 套件 ok。
 - 提交 `ad04369` Align translated validation messages（service.go+i18n_test.go 同一訊息契約的兩半不可分離故同體提交）並 push `9ddcbf0..ad04369`。
 - GitHub Actions run `33050084208` 全部通過：Go 1.25.x checks (1m7s)、Go 1.26.x checks (1m19s)、govulncheck (18s)、secret scan (8s)、Node 22 server checks (39s)、Windows GUI build (1m19s)；僅餘 actions 的 Node.js 20 deprecation annotation（非阻塞工作流程維護事項）。
+
+## 2026-08-29：server 目錄審查（無程式變更）
+
+- 使用者要求「看一下 server/」；執行完整基線驗證並通讀 server/src 全部 17 個原始檔。
+- 基線全綠：format:check、lint、typecheck、npm test 42/42、build、npm audit --omit=dev 0 vulnerabilities；工作樹乾淨（HEAD c816c07）。
+- 曾懷疑 http/app.ts 全域 bodyLimit 1MB 會擋下 1MB～100MB 的 GUI 上傳（Go client 會設 Content-Length）；以暫存重現腳本實證 Fastify v5 對串流 content-type parser 不強制 app-level bodyLimit（content-length 5MB 與 chunked 5MB 均 200），疑慮不成立，實際限制是 proxy 的 S3_MAX_BYTES/limitBytes；暫存腳本已刪除。
+- 審查結論：無重大或高風險缺陷。提出 6 項非必要建議：token/session/refresh_history 表無限期成長（audit 有每日清理但 token 表沒有）、login 帳號不存在時跳過 scrypt 的計時側通道、Bot /connection_test 無逾時、runtime 把 audit cleanup 錯誤路由到 onBotError 會導致整個服務關閉、TRUSTED_PROXIES CIDR 格式未驗證、wizard 敏感值 trim。
+- 正向確認：分層架構乾淨、SQL 全面 prepared statements、session 建立/輪換皆在 transaction、refresh reuse 撤銷整個 family、S3 key `..` 防護、上傳下載雙重 byte 上限、稽核僅存 statement hash、敏感 wizard 訊息 best-effort 刪除屬實。
+- 未連線真實 Telegram、S3、MySQL/PostgreSQL；本輪無程式碼或文件變更，僅更新 agent 紀錄。

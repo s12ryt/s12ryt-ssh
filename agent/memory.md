@@ -110,3 +110,11 @@
 - Git 操作：`$env:GIT_MASTER='1'` 下建立 5 個原子提交——f679527 Extend interface translations、3d19864 Add interface upgrade helpers、1b618d4 Update local workspace interface、9ddcbf0 Update remote workspace interface、ad04369 Align translated validation messages（fix）；push 8fa9202..ad04369 main→origin/main。
 - 缺陷修復：run 33043969578 RED（TestGUIStringsTranslateToTraditionalChinese 對舊字串 "SQL type, host, ..." 反查失敗）；根因＝字典改了但 service.go:407 與 i18n_test.go:87 未同步；GREEN 證據＝run 33050084208 六個 job 全部成功（Go 1.25.x/1.26.x test/vet/build、govulncheck、gitleaks、Node 22 server checks、Windows GUI build）。
 - 本輪限制照舊：本機不跑 internal/i18n 測試（防毒誤判測試執行檔）、不重產 .exe、race/gopls 不可用；替代證據為精確字串一致性 grep + 字典靜態對稱 + GitHub Actions Windows runner 實跑。
+
+## 2026-08-29：server 審查
+
+- 讀取：agent 三份紀錄、server/README.md、package.json、server/src 全部 17 檔（config、errors、index、runtime、domain/models、security/crypto、db/database、http/app、proxy/gateways、proxy/proxy-service、adapters/s3-gateway、adapters/sql-gateway、services/auth-service、services/admin-service、bot/telegram、bot/controller 全文）、test 目錄清單與 http-api.test.ts 上傳案例、internal/remote proxy.go 的 ContentLength 行為。
+- 執行：npm run format:check / lint / typecheck / test（42/42）/ build / audit --omit=dev（0 漏洞）全部通過。
+- 寫入：agent/deep_todos.md、agent/memory.md 各一段審查紀錄；未修改任何正式程式碼。
+- 暫存檔操作：在 C:\Users\yoyo2\AppData\Local\Temp\opencode\bodylimit-repro\repro.mjs 建立 Fastify bodyLimit 實證腳本，短暫複製為 server/.repro-bodylimit.mjs 執行（結論：octet-stream 串流上傳不受 app bodyLimit 限制）後已刪除，server 目錄無殘留。
+- git：無 commit/push；工作樹在更新 agent 紀錄前為乾淨。
