@@ -149,3 +149,23 @@
 - `go test ./internal/gui` 及其他本機可跑套件全綠；`go vet ./...`、`go build ./...`、`gofmt` 通過；本機不執行 `internal/i18n` 測試（防毒限制），i18n 新 key 交付 CI 驗證。
 - 新增 UI 字串均加入英/繁字典；外部服務原始錯誤保持原文。
 - 不改動本機 Vault / 遠端服務的公開行為契約；不 commit/push（未獲指示）。
+
+## 2026-08-29：server 拆分為獨立倉庫
+
+### 需求（使用者已確認）
+
+- 將 `server/` 目錄拆分為獨立公開倉庫 `s12ryt/s12ryt-ssh-auth-server`。
+- 保留 server 相關 Git 歷史：以 `git subtree split -P server` 產生分支，提交訊息、作者與時間不變，root tree 即原 server/ 內容。
+- `server/README.md` 在新倉庫成為根 `README.md`，內容調整為獨立倉庫語境（移除 `Set-Location server`、補主倉庫 s12ryt-ssh 連結）。
+- 新倉庫攜帶 Node 22 CI workflow（format/lint/typecheck/test/build/npm audit）與 secret scan；路徑去掉 `working-directory: server`。
+- 新倉庫新增 `.gitignore`（.env、data/、SQLite 檔、node_modules/、dist/）。
+- 主倉庫移除 `server/` 目錄；CI 移除 node-checks job；README 的 server 相關段落改為指向新倉庫；`.gitignore` 移除 server 專屬條目。
+- 主倉庫變更以英文 plain-style 原子提交並立即推送 origin/main；新倉庫調整提交同風格並推送 main。所有提交附 Sisyphus footer。
+
+### 驗收標準
+
+- 新倉庫 main 分支包含 13 個 server 歷史提交 + 3 個調整提交；調整前驗證 split tree 與主倉庫 `server/` 內容一致。
+- 新倉庫 GitHub Actions CI 觸發且通過。
+- 主倉庫推送後 CI（Go jobs、Windows build、govulncheck、secret scan）通過，node-checks job 已移除。
+- 主倉庫不再追蹤 `server/`，README 無殘留 `server/` 相對連結。
+- 兩倉庫工作樹乾淨；agent 紀錄已更新。
