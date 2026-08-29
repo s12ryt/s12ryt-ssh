@@ -6,7 +6,6 @@ import (
 	"testing"
 
 	"s12ryt-ssh/internal/remote"
-	"s12ryt-ssh/internal/storage"
 
 	"gioui.org/widget"
 )
@@ -111,35 +110,6 @@ func TestConfirmationRequestAcceptCancelLifecycle(t *testing.T) {
 	}
 }
 
-func TestNormalizeDBTypeCanonicalizesAliasesAndRejectsUnsupported(t *testing.T) {
-	for input, want := range map[string]string{
-		"mysql":      "mysql",
-		"MySQL":      "mysql",
-		" MySQL ":    "mysql",
-		"postgres":   "postgres",
-		"PostgreSQL": "postgres",
-		"pg":         "postgres",
-		" PG":        "postgres",
-	} {
-		got, err := normalizeDBType(input)
-		if err != nil || got != want {
-			t.Fatalf("normalizeDBType(%q) = %q, %v; want %q", input, got, err, want)
-		}
-	}
-	for _, input := range []string{"", "   ", "sqlite", "oracle", "mariadb"} {
-		if _, err := normalizeDBType(input); err == nil {
-			t.Fatalf("normalizeDBType(%q) must fail", input)
-		}
-	}
-}
-
-func TestDBTypeChoicesCoverSupportedDrivers(t *testing.T) {
-	choices := dbTypeChoices()
-	if len(choices) != 2 || choices[0] != "MySQL" || choices[1] != "PostgreSQL" {
-		t.Fatalf("dbTypeChoices() = %v, want [MySQL PostgreSQL]", choices)
-	}
-}
-
 func TestPasswordRevealToggleAndMask(t *testing.T) {
 	var reveal passwordReveal
 	if mask := reveal.mask(); mask != '•' {
@@ -221,20 +191,6 @@ func TestSendTerminalInputWritesLineAndClearsInput(t *testing.T) {
 	}
 }
 
-func TestSelectObjectFillsObjectKeyEditor(t *testing.T) {
-	ui := NewWindow(nil)
-	ui.objects = []storage.Object{{Key: "a.txt", Size: 1}, {Key: "dir/b.txt", Size: 2}}
-	ui.selectObject(1)
-	if ui.storageKey.Text() != "dir/b.txt" {
-		t.Fatalf("object key after select = %q", ui.storageKey.Text())
-	}
-	ui.selectObject(-1)
-	ui.selectObject(len(ui.objects))
-	if ui.storageKey.Text() != "dir/b.txt" {
-		t.Fatalf("out-of-range select must not change the key: %q", ui.storageKey.Text())
-	}
-}
-
 func TestSelectRemoteObjectFillsObjectKeyEditor(t *testing.T) {
 	ui := NewWindow(nil)
 	ui.remoteObjects = []remote.S3Object{{Key: "x.txt"}, {Key: "y.txt"}}
@@ -249,38 +205,17 @@ func TestSelectRemoteObjectFillsObjectKeyEditor(t *testing.T) {
 	}
 }
 
-func TestTryActionsGuardBusyAndValidation(t *testing.T) {
+func TestTryRemoteSignInGuardsBusyAndValidation(t *testing.T) {
 	ui := NewWindow(nil)
 
 	ui.busy = true
-	if ui.trySignIn() || ui.tryCreateVault() || ui.tryRotateRecovery() || ui.tryRemoteSignIn() || ui.trySSHConnect() {
+	if ui.tryRemoteSignIn() {
 		t.Fatal("try actions must be rejected while busy")
 	}
 	if ui.terminalCtx != nil {
-		t.Fatal("busy trySSHConnect must not create a terminal context")
+		t.Fatal("busy actions must not create a terminal context")
 	}
 	ui.busy = false
-
-	if ui.trySignIn() {
-		t.Fatal("empty sign-in credentials must be rejected")
-	}
-	if ui.model.Error == "" || ui.busy {
-		t.Fatalf("sign-in validation error = %q busy %v", ui.model.Error, ui.busy)
-	}
-
-	if ui.tryCreateVault() {
-		t.Fatal("empty vault credentials must be rejected")
-	}
-	if ui.model.Error == "" || ui.busy {
-		t.Fatalf("vault validation error = %q busy %v", ui.model.Error, ui.busy)
-	}
-
-	if ui.tryRotateRecovery() {
-		t.Fatal("empty recovery credentials must be rejected")
-	}
-	if ui.model.Error == "" || ui.busy {
-		t.Fatalf("recovery validation error = %q busy %v", ui.model.Error, ui.busy)
-	}
 
 	ui.remoteURL.SetText("https://auth.example.com")
 	ui.remoteUsername.SetText("alice")
@@ -291,12 +226,8 @@ func TestTryActionsGuardBusyAndValidation(t *testing.T) {
 	if ui.model.Error != "Remote authentication service is unavailable" {
 		t.Fatalf("remote service error = %q", ui.model.Error)
 	}
-
-	if ui.trySSHConnect() {
-		t.Fatal("invalid SSH profile must be rejected")
-	}
-	if ui.model.Error == "" || ui.terminalCtx != nil {
-		t.Fatalf("ssh validation error = %q ctx %v", ui.model.Error, ui.terminalCtx)
+	if ui.terminalCtx != nil {
+		t.Fatal("validation failure must not create a terminal context")
 	}
 }
 
@@ -316,9 +247,6 @@ func TestObjectsHeaderCountsObjects(t *testing.T) {
 
 func TestRequestConfirmBlocksWhileBusy(t *testing.T) {
 	ui := NewWindow(nil)
-	if ui.setupDBKind != dbTypeMySQL || ui.databaseKind != dbTypeMySQL {
-		t.Fatalf("default db kinds = %q/%q, want mysql", ui.setupDBKind, ui.databaseKind)
-	}
 
 	ui.requestConfirm("Delete object", "This permanently deletes the object. This action cannot be undone.", func() {})
 	if !ui.confirm.active {
@@ -349,21 +277,6 @@ func TestUseStackedRowSwitchesOnNarrowWidths(t *testing.T) {
 	}
 }
 
-func TestApplyDatabaseKindNormalizesProfileTypes(t *testing.T) {
-	if got := applyDatabaseKind(dbTypeMySQL, "PostgreSQL"); got != dbTypePostgres {
-		t.Fatalf("applyDatabaseKind = %q, want %q", got, dbTypePostgres)
-	}
-	if got := applyDatabaseKind(dbTypePostgres, "pg"); got != dbTypePostgres {
-		t.Fatalf("applyDatabaseKind = %q, want %q", got, dbTypePostgres)
-	}
-	if got := applyDatabaseKind(dbTypeMySQL, "MYSQL"); got != dbTypeMySQL {
-		t.Fatalf("applyDatabaseKind = %q, want %q", got, dbTypeMySQL)
-	}
-	if got := applyDatabaseKind(dbTypePostgres, "sqlite"); got != dbTypePostgres {
-		t.Fatalf("unsupported legacy type must keep current kind, got %q", got)
-	}
-}
-
 func TestIsSecretHintDetectsSecretFields(t *testing.T) {
 	for _, label := range []string{"Password", "Vault password", "Secret key", "Key passphrase"} {
 		if !isSecretHint(label) {
@@ -389,14 +302,10 @@ func TestUIUpgradeStringsTranslateToTraditionalChinese(t *testing.T) {
 		"This runs a statement that can modify data. Continue?",
 		"Show",
 		"Hide",
-		"Copy recovery key",
-		"Recovery key copied to clipboard.",
-		"No profiles yet. Create one below.",
 		"SQL statement is required",
 		"SSH terminal is not connected",
 		"%d objects",
 		"Signing out...",
-		"database type must be MySQL or PostgreSQL",
 	}
 	for _, source := range sources {
 		if got := ui.text(source); got == source {

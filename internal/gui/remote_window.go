@@ -16,11 +16,6 @@ import (
 )
 
 func (ui *Window) handleRemoteLogin(gtx layout.Context) {
-	if ui.remoteBack.Clicked(gtx) {
-		ui.remotePassword.SetText("")
-		ui.model.CancelRemoteLogin()
-		return
-	}
 	if ui.drainEditors(gtx, &ui.remoteURL, &ui.remoteUsername, &ui.remotePassword) {
 		ui.tryRemoteSignIn()
 		return
@@ -39,18 +34,18 @@ func (ui *Window) handleRemoteLogin(gtx layout.Context) {
 			if err != nil {
 				return nil, err
 			}
-			resources, err := session.Resources(ctx)
+			overview, err := session.ResourcesOverview(ctx)
 			if err != nil {
 				_ = session.Logout(ctx)
 				return nil, err
 			}
-			return func() { ui.activateRemoteSession(session, resources) }, nil
+			return func() { ui.activateRemoteSession(session, overview.Resources, overview.SSHEnabled) }, nil
 		})
 	}
 }
 
-func (ui *Window) activateRemoteSession(session RemoteSession, resources []remote.Resource) {
-	ui.model.SetRemoteSession(session)
+func (ui *Window) activateRemoteSession(session RemoteSession, resources []remote.Resource, sshEnabled bool) {
+	ui.model.SetRemoteSession(session, sshEnabled)
 	ui.remoteResources = append([]remote.Resource(nil), resources...)
 	ui.remoteResourceButtons = make([]widget.Clickable, len(resources))
 	ui.remoteIndex = -1
@@ -87,6 +82,12 @@ func (ui *Window) handleRemoteWorkspace(gtx layout.Context) {
 		})
 		return
 	}
+	if ui.sshTab.Clicked(gtx) {
+		ui.model.SelectTab(TabSSH)
+		if len(ui.sshHosts) == 0 {
+			ui.refreshSSHHosts()
+		}
+	}
 	if ui.storageTab.Clicked(gtx) {
 		ui.model.SelectTab(TabStorage)
 		ui.selectFirstRemoteResource()
@@ -104,6 +105,8 @@ func (ui *Window) handleRemoteWorkspace(gtx layout.Context) {
 		ui.refreshRemoteResources()
 	}
 	switch ui.model.Tab {
+	case TabSSH:
+		ui.handleRemoteSSH(gtx)
 	case TabStorage:
 		ui.handleRemoteStorage(gtx)
 	case TabDatabase:
@@ -117,13 +120,17 @@ func (ui *Window) refreshRemoteResources() {
 		return
 	}
 	ui.async("Loading assigned connections...", func(ctx context.Context) (func(), error) {
-		resources, err := session.Resources(ctx)
+		overview, err := session.ResourcesOverview(ctx)
 		if err != nil {
 			return nil, err
 		}
 		return func() {
-			ui.remoteResources = append([]remote.Resource(nil), resources...)
-			ui.remoteResourceButtons = make([]widget.Clickable, len(resources))
+			ui.remoteResources = append([]remote.Resource(nil), overview.Resources...)
+			ui.remoteResourceButtons = make([]widget.Clickable, len(overview.Resources))
+			ui.model.SSHEnabled = overview.SSHEnabled
+			if !overview.SSHEnabled && ui.model.Tab == TabSSH {
+				ui.model.Tab = TabStorage
+			}
 			ui.selectFirstRemoteResource()
 		}, nil
 	})
@@ -335,7 +342,6 @@ func (ui *Window) remoteLoginView(gtx layout.Context) layout.Dimensions {
 					layout.Rigid(func(gtx layout.Context) layout.Dimensions {
 						return ui.button(gtx, &ui.remoteRestore, "Restore saved session", false)
 					}),
-					layout.Rigid(func(gtx layout.Context) layout.Dimensions { return ui.button(gtx, &ui.remoteBack, "Back", false) }),
 				)
 			})
 		})
@@ -351,12 +357,21 @@ func (ui *Window) remoteWorkspaceView(gtx layout.Context) layout.Dimensions {
 		layout.Rigid(func(gtx layout.Context) layout.Dimensions { return ui.status(gtx) }),
 		layout.Flexed(1, func(gtx layout.Context) layout.Dimensions {
 			return layout.Flex{Axis: layout.Horizontal, Gap: gtx.Dp(12)}.Layout(gtx,
-				layout.Rigid(func(gtx layout.Context) layout.Dimensions { return ui.remoteSidebar(gtx) }),
-				layout.Flexed(1, func(gtx layout.Context) layout.Dimensions {
-					if ui.model.Tab == TabStorage {
-						return ui.remoteStorageView(gtx)
+				layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+					if ui.model.Tab == TabSSH {
+						return ui.remoteSSHSidebar(gtx)
 					}
-					return ui.remoteDatabaseView(gtx)
+					return ui.remoteSidebar(gtx)
+				}),
+				layout.Flexed(1, func(gtx layout.Context) layout.Dimensions {
+					switch ui.model.Tab {
+					case TabSSH:
+						return ui.remoteSSHView(gtx)
+					case TabStorage:
+						return ui.remoteStorageView(gtx)
+					default:
+						return ui.remoteDatabaseView(gtx)
+					}
 				}),
 			)
 		}),
@@ -364,7 +379,13 @@ func (ui *Window) remoteWorkspaceView(gtx layout.Context) layout.Dimensions {
 }
 
 func (ui *Window) remoteTabs(gtx layout.Context) layout.Dimensions {
-	return layout.Flex{Axis: layout.Horizontal, Gap: gtx.Dp(8)}.Layout(gtx,
+	children := make([]layout.FlexChild, 0, 3)
+	if ui.model.SSHEnabled {
+		children = append(children, layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+			return ui.button(gtx, &ui.sshTab, "SSH", ui.model.Tab == TabSSH)
+		}))
+	}
+	children = append(children,
 		layout.Rigid(func(gtx layout.Context) layout.Dimensions {
 			return ui.button(gtx, &ui.storageTab, "S3 / R2", ui.model.Tab == TabStorage)
 		}),
@@ -372,6 +393,7 @@ func (ui *Window) remoteTabs(gtx layout.Context) layout.Dimensions {
 			return ui.button(gtx, &ui.databaseTab, "SQL database", ui.model.Tab == TabDatabase)
 		}),
 	)
+	return layout.Flex{Axis: layout.Horizontal, Gap: gtx.Dp(8)}.Layout(gtx, children...)
 }
 
 func (ui *Window) remoteSidebar(gtx layout.Context) layout.Dimensions {

@@ -4,43 +4,35 @@ import (
 	"bytes"
 	"context"
 	"io"
-	"path/filepath"
 	"testing"
 
-	"s12ryt-ssh/internal/app"
-	"s12ryt-ssh/internal/config"
 	"s12ryt-ssh/internal/remote"
-	"s12ryt-ssh/internal/securestore"
-	"s12ryt-ssh/internal/storage"
-	"s12ryt-ssh/internal/vault"
 )
 
-func TestNewModelChoosesSetupOrLogin(t *testing.T) {
-	missing := app.NewService(filepath.Join(t.TempDir(), "metadata.json"), securestore.NewMemoryStore(), nil)
-	if got := NewModel(missing).Screen; got != ScreenSetup {
-		t.Fatalf("missing vault screen: got %v", got)
+func TestNewModelOpensRemoteLogin(t *testing.T) {
+	model := NewModel(nil)
+	if model.Screen != ScreenRemoteLogin {
+		t.Fatalf("initial screen: got %v", model.Screen)
 	}
-
-	service, _ := registeredService(t)
-	model := NewModel(service)
-	if model.Screen != ScreenLogin {
-		t.Fatalf("configured vault screen: got %v", model.Screen)
+	if model.Tab != TabStorage {
+		t.Fatalf("initial tab: got %v", model.Tab)
 	}
-	if model.AccountName != "alice" {
-		t.Fatalf("account name: %q", model.AccountName)
+	if model.Status == "" {
+		t.Fatal("initial status is empty")
 	}
 }
 
 type fakeRemoteSession struct {
-	logoutCount int
+	logoutCount      int
+	fingerprintCalls []string
 }
 
 func (s *fakeRemoteSession) Account() remote.Account {
 	return remote.Account{ID: "account-1", Username: "remote-alice"}
 }
 
-func (s *fakeRemoteSession) Resources(context.Context) ([]remote.Resource, error) {
-	return nil, nil
+func (s *fakeRemoteSession) ResourcesOverview(context.Context) (remote.ResourcesOverview, error) {
+	return remote.ResourcesOverview{}, nil
 }
 
 func (s *fakeRemoteSession) ListObjects(context.Context, string, string) ([]remote.S3Object, error) {
@@ -71,21 +63,40 @@ func (s *fakeRemoteSession) Exec(context.Context, string, string, []any) (remote
 	return remote.SQLExecResult{}, nil
 }
 
+func (s *fakeRemoteSession) SSHHosts(context.Context) ([]remote.SSHHost, error) {
+	return []remote.SSHHost{{ID: "host-1", Name: "web", Host: "web.example.com", Port: 22, Username: "deploy"}}, nil
+}
+
+func (s *fakeRemoteSession) CreateSSHHost(context.Context, remote.SSHHostInput) (remote.SSHHost, error) {
+	return remote.SSHHost{ID: "host-2"}, nil
+}
+
+func (s *fakeRemoteSession) UpdateSSHHost(context.Context, string, remote.SSHHostInput) (remote.SSHHost, error) {
+	return remote.SSHHost{ID: "host-1"}, nil
+}
+
+func (s *fakeRemoteSession) DeleteSSHHost(context.Context, string) error {
+	return nil
+}
+
+func (s *fakeRemoteSession) SSHHostCredentials(context.Context, string) (remote.SSHHostCredentials, error) {
+	return remote.SSHHostCredentials{ID: "host-1", Host: "web.example.com", Port: 22, Username: "deploy"}, nil
+}
+
+func (s *fakeRemoteSession) SetSSHHostFingerprint(_ context.Context, _, fingerprint string) error {
+	s.fingerprintCalls = append(s.fingerprintCalls, fingerprint)
+	return nil
+}
+
 func (s *fakeRemoteSession) Logout(context.Context) error {
 	s.logoutCount++
 	return nil
 }
 
-func TestModelRemoteWorkspaceExcludesSSHAndReturnsToOriginalScreen(t *testing.T) {
-	missing := app.NewService(filepath.Join(t.TempDir(), "metadata.json"), securestore.NewMemoryStore(), nil)
-	model := NewModelWithRemote(missing, nil)
-	model.BeginRemoteLogin()
-	if model.Screen != ScreenRemoteLogin {
-		t.Fatalf("remote login screen = %v", model.Screen)
-	}
-
+func TestModelRemoteWorkspaceExcludesSSHAndReturnsToRemoteLogin(t *testing.T) {
+	model := NewModel(nil)
 	session := &fakeRemoteSession{}
-	model.SetRemoteSession(session)
+	model.SetRemoteSession(session, false)
 	if model.Screen != ScreenRemoteWorkspace || model.Tab != TabStorage || model.RemoteAccountName != "remote-alice" {
 		t.Fatalf("remote workspace state = %+v", model)
 	}
@@ -100,71 +111,28 @@ func TestModelRemoteWorkspaceExcludesSSHAndReturnsToOriginalScreen(t *testing.T)
 	if err := model.LogoutRemote(context.Background()); err != nil {
 		t.Fatal(err)
 	}
-	if session.logoutCount != 1 || model.Screen != ScreenSetup || model.RemoteSession != nil {
+	if session.logoutCount != 1 || model.Screen != ScreenRemoteLogin || model.RemoteSession != nil {
 		t.Fatalf("remote logout state = %+v, logout count = %d", model, session.logoutCount)
 	}
 }
 
-func TestModelCancelsRemoteLoginBackToConfiguredLocalLogin(t *testing.T) {
-	service, _ := registeredService(t)
-	model := NewModelWithRemote(service, nil)
-	model.BeginRemoteLogin()
-	model.CancelRemoteLogin()
-	if model.Screen != ScreenLogin || model.AccountName != "alice" {
-		t.Fatalf("cancel remote login state = %+v", model)
+func TestModelRemoteWorkspaceEnablesSSHTabByAccountFlag(t *testing.T) {
+	model := NewModel(nil)
+	model.SetRemoteSession(&fakeRemoteSession{}, true)
+	if !model.SSHEnabled {
+		t.Fatal("ssh enabled flag not stored")
 	}
-}
-
-func TestModelTransitionsThroughRecoveryAndWorkspace(t *testing.T) {
-	service, _ := registeredService(t)
-	model := NewModel(service)
-	registration := vault.Registration{ID: "vault-id", Name: "alice", RecoveryKey: "recovery-key"}
-	model.SetRegistration(registration)
-	if model.Screen != ScreenRecovery || model.RecoveryKey != registration.RecoveryKey {
-		t.Fatalf("recovery state: %+v", model)
+	model.SelectTab(TabSSH)
+	if model.Tab != TabSSH {
+		t.Fatalf("ssh tab rejected while enabled: %v", model.Tab)
 	}
-	model.ContinueFromRecovery()
-	if model.Screen != ScreenLogin || model.AccountName != registration.Name {
-		t.Fatalf("login state: %+v", model)
+	model.LogoutRemote(context.Background())
+	if model.SSHEnabled {
+		t.Fatal("ssh enabled flag not reset on logout")
 	}
-	model.BeginRecovery()
-	if model.Screen != ScreenRecovery || model.RecoveryKey != "" {
-		t.Fatalf("recovery form state: %+v", model)
+	model.SetRemoteSession(&fakeRemoteSession{}, true)
+	model.SelectTab(TabSSH)
+	if model.Tab != TabSSH {
+		t.Fatalf("ssh tab rejected after re-login: %v", model.Tab)
 	}
-	model.ContinueFromRecovery()
-
-	session, err := service.Login(context.Background(), "alice", "password")
-	if err != nil {
-		t.Fatal(err)
-	}
-	model.SetSession(session)
-	if model.Screen != ScreenWorkspace || model.Tab != TabSSH {
-		t.Fatalf("workspace state: %+v", model)
-	}
-	model.SelectTab(TabStorage)
-	if model.Tab != TabStorage {
-		t.Fatalf("selected tab: %v", model.Tab)
-	}
-	if err := model.Logout(); err != nil {
-		t.Fatal(err)
-	}
-	if model.Screen != ScreenLogin || model.Session != nil {
-		t.Fatalf("logout state: %+v", model)
-	}
-}
-
-func registeredService(t *testing.T) (*app.Service, vault.Registration) {
-	t.Helper()
-	remote := vault.NewObjectBackend(storage.NewMemoryStorage())
-	service := app.NewService(filepath.Join(t.TempDir(), "metadata.json"), securestore.NewMemoryStore(), func(context.Context, app.Bootstrap) (app.BackendHandle, error) {
-		return app.BackendHandle{Backend: remote}, nil
-	})
-	bootstrap := app.Bootstrap{Backend: "s3", S3: config.S3Profile{
-		Endpoint: "https://r2.example", AccessKey: "access", SecretKey: "bootstrap-secret", Bucket: "vault",
-	}}
-	registration, err := service.Register(context.Background(), bootstrap, "alice", "password", &config.Store{})
-	if err != nil {
-		t.Fatal(err)
-	}
-	return service, registration
 }

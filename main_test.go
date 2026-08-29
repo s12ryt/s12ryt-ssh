@@ -12,30 +12,30 @@ func TestApplicationPathsUseUserConfigDirectory(t *testing.T) {
 		t.Fatalf("os.UserConfigDir() error = %v", err)
 	}
 
-	metadataPath, securestoreDir := applicationPaths()
+	root := applicationConfigRoot()
 	wantRoot := filepath.Join(configDir, "s12ryt-ssh")
-	if metadataPath != filepath.Join(wantRoot, "metadata.json") {
-		t.Fatalf("metadata path = %q, want under %q", metadataPath, wantRoot)
+	if root != wantRoot {
+		t.Fatalf("config root = %q, want %q", root, wantRoot)
 	}
-	if securestoreDir != filepath.Join(wantRoot, "securestore") {
-		t.Fatalf("securestore path = %q, want under %q", securestoreDir, wantRoot)
+	if got := applicationSecurestoreDir(); got != filepath.Join(wantRoot, "securestore") {
+		t.Fatalf("securestore path = %q, want under %q", got, wantRoot)
 	}
 }
 
 func TestApplicationPreferencesUseSeparateNonSensitiveFile(t *testing.T) {
-	metadataPath, _ := applicationPaths()
-	if got, want := applicationPreferencesPath(), filepath.Join(filepath.Dir(metadataPath), "preferences.json"); got != want {
+	want := filepath.Join(applicationConfigRoot(), "preferences.json")
+	if got := applicationPreferencesPath(); got != want {
 		t.Fatalf("preferences path = %q, want %q", got, want)
 	}
 }
 
 func TestApplicationRemotePreferencesUseSeparateNonSensitiveFile(t *testing.T) {
-	metadataPath, _ := applicationPaths()
-	want := filepath.Join(filepath.Dir(metadataPath), "remote-preferences.json")
+	root := applicationConfigRoot()
+	want := filepath.Join(root, "remote-preferences.json")
 	if got := applicationRemotePreferencesPath(); got != want {
 		t.Fatalf("remote preferences path = %q, want %q", got, want)
 	}
-	if got := applicationRemotePreferencesPath(); got == applicationPreferencesPath() || got == metadataPath {
-		t.Fatalf("remote preferences path %q must be separate from language preferences and vault metadata", got)
+	if got := applicationRemotePreferencesPath(); got == applicationPreferencesPath() {
+		t.Fatalf("remote preferences path %q must be separate from language preferences", got)
 	}
 }

@@ -169,3 +169,40 @@
 - 主倉庫推送後 CI（Go jobs、Windows build、govulncheck、secret scan）通過，node-checks job 已移除。
 - 主倉庫不再追蹤 `server/`，README 無殘留 `server/` 相對連結。
 - 兩倉庫工作樹乾淨；agent 紀錄已更新。
+
+## 2026-08-29：移除本機 Vault，全面遠端登入，新增遠端 SSH 主機
+
+### 需求（使用者已確認）
+
+- 完全移除本機 Vault：設定精靈、R2/S3 與 SQL vault backend、復原金鑰、本機登入與本機 SSH/S3/SQL profile 全部移除；App 唯一入口是「登入校驗」遠端登入。
+- `internal/vault`、`internal/storage`、`internal/database` 與精靈/復原/本機工作區 GUI 刪除；go.mod 移除僅被刪除套件使用的依賴（aws-sdk、SQL drivers 等）。`internal/ssh`、`internal/securestore`（DPAPI refresh token）保留。
+- 遠端 SSH 採「憑證下發＋客戶端直連」：
+  - 服務端以既有 MASTER_KEY AES-256-GCM 加密保存 SSH profile（密碼或私鑰＋可選 key passphrase）。
+  - 登入後 GUI 以 access token 經 HTTPS 下發憑證，只在記憶體使用，不落盤。
+  - 客戶端沿用既有 `internal/ssh` 直連（host key fingerprint 首次確認、PTY、逾時全部保留）。
+  - S3/SQL 仍由服務端代理、憑證絕不下發；SSH 是唯一例外（使用者自助的私人主機）。
+- SSH 主機由使用者自助管理：遠端工作區 GUI 新增/編輯/刪除自己的 SSH 主機，僅該帳號可見；每帳號上限 50 台，超出回明確錯誤。
+- 認證方式支援密碼與 private key（含可選 key passphrase）。
+- host key fingerprint 存服務端：SSH profile 的一部分；首次連線 GUI 顯示並確認後寫回服務端；跨裝置一致。編輯時若 host 或 port 變更，服務端清空 trusted fingerprint（除非同次請求明確提供新值）。
+- 憑證下發防護：有效 access token 即可 GET `/credentials`，每次下發寫入稽核（metadata only）。
+- 帳號級 SSH 開關：accounts 新增 `ssh_enabled`（預設啟用）；Telegram Bot 可切換；關閉時該帳號遠端工作區不顯示 SSH 功能，且所有 SSH API 回 403。Bot 只能看到開關，看不到使用者的 SSH 主機。
+- 遠端 S3/SQL 行為維持現狀（管理員 Bot 指派、服務端代理）。
+- 既有本機 Vault 的雲端密文不做遷移或刪除；App 不再讀取。
+- 編輯 SSH 主機時憑證欄位留空/省略表示不變更。
+- 兩倉庫同步完成：服務端（s12ryt-ssh-auth-server）新增 SSH hosts API、帳號開關與 Bot 指令；主倉庫移除本機 Vault 並新增遠端 SSH GUI；各自原子提交、推送 main，兩邊 CI 全綠。
+
+### 驗收標準
+
+- 服務端（s12ryt-ssh-auth-server）：
+  - 版本化 transaction migration 新增 `ssh_hosts` 表與 `accounts.ssh_enabled`，冪等。
+  - `/api/v1/ssh-hosts` CRUD＋`/:id/credentials` 下發：僅限本人 host、`ssh_enabled` 停用回 403、上限 50、憑證 AES-256-GCM 加密保存、回應（下發 endpoint 除外）不含明文 secret。
+  - 稽核只記 metadata：時間、帳號、裝置/IP、操作、host id/名稱、成敗；不保存密碼、私鑰或 fingerprint 以外的敏感內容。
+  - 未授權、停權、撤銷 token 不得存取 SSH API。
+  - Bot 可切換帳號 ssh_enabled；非管理員與群組訊息不可操作。
+  - Node 測試依 RED→GREEN 涵蓋上述行為；CI 全綠。
+- 主倉庫（s12ryt-ssh）：
+  - 本機 Vault 相關套件、GUI 畫面、i18n keys、go.mod 依賴移除；`go build ./...`、`go vet ./...`、本機可執行測試全綠，無殘留未用依賴。
+  - App 啟動直接進遠端登入畫面；remote-preferences（URL/帳號）沿用；登入後遠端工作區含 SSH 分頁（ssh_enabled 關閉時不顯示）。
+  - 遠端 SSH：主機列表、新增、編輯（憑證留空不變更）、刪除、連線（下發憑證、fingerprint 首次確認後寫回服務端、PTY 終端、逾時、關閉）。
+  - 新增行為依 RED→GREEN 測試；i18n 英/繁字典完整覆蓋新 key；README 反映新架構（單一遠端入口、SSH 憑證下發的安全模型說明）。
+- 不在範圍：SSH 服務端代理/WebSocket、本機 Vault 資料遷移、S3/SQL 憑證下發、管理員查看使用者 SSH 主機、SSH tunnel。

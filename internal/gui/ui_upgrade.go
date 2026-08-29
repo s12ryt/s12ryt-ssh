@@ -5,10 +5,6 @@ import (
 	"fmt"
 	"image/color"
 	"strings"
-	"time"
-
-	"s12ryt-ssh/internal/config"
-	sshclient "s12ryt-ssh/internal/ssh"
 
 	"gioui.org/widget"
 )
@@ -139,40 +135,6 @@ func (c *confirmation) accept() {
 	action()
 }
 
-// normalizeDBType maps free-text SQL type names onto the two supported drivers.
-func normalizeDBType(value string) (string, error) {
-	switch strings.ToLower(strings.TrimSpace(value)) {
-	case "mysql":
-		return dbTypeMySQL, nil
-	case "postgres", "postgresql", "pg":
-		return dbTypePostgres, nil
-	default:
-		return "", fmt.Errorf("database type must be MySQL or PostgreSQL")
-	}
-}
-
-// Canonical database kind values shared by the picker state and profile I/O.
-const (
-	dbTypeMySQL    = "mysql"
-	dbTypePostgres = "postgres"
-)
-
-// applyDatabaseKind adopts a normalized profile type into the picker state.
-// Unsupported legacy values keep the current selection so old vaults never
-// block the form.
-func applyDatabaseKind(current, value string) string {
-	normalized, err := normalizeDBType(value)
-	if err != nil {
-		return current
-	}
-	return normalized
-}
-
-// dbTypeChoices lists the canonical database type picker labels.
-func dbTypeChoices() []string {
-	return []string{"MySQL", "PostgreSQL"}
-}
-
 // editorRowStackBelowDp is the form width under which paired editor fields
 // stack vertically instead of squeezing each other out of view.
 const editorRowStackBelowDp = 640
@@ -262,14 +224,6 @@ func (ui *Window) sendTerminalInput() bool {
 	return true
 }
 
-// selectObject copies a listed object key into the object key editor.
-func (ui *Window) selectObject(index int) {
-	if index < 0 || index >= len(ui.objects) {
-		return
-	}
-	ui.storageKey.SetText(ui.objects[index].Key)
-}
-
 // selectRemoteObject copies a listed remote object key into the editor.
 func (ui *Window) selectRemoteObject(index int) {
 	if index < 0 || index >= len(ui.remoteObjects) {
@@ -295,80 +249,6 @@ func revealLabel(shown bool) string {
 // monoTypeface is the monospace face used for terminal and SQL output.
 const monoTypeface = "Go Mono"
 
-// trySignIn validates and starts the local vault sign-in flow; it reports
-// whether the asynchronous operation was started.
-func (ui *Window) trySignIn() bool {
-	if ui.busy {
-		return false
-	}
-	name, password := strings.TrimSpace(ui.loginName.Text()), ui.loginPassword.Text()
-	if err := validateLoginCredentials(name, password); err != nil {
-		ui.model.Error = err.Error()
-		return false
-	}
-	service := ui.model.Service
-	ui.async("Unlocking encrypted vault...", func(ctx context.Context) (func(), error) {
-		session, err := service.Login(ctx, name, password)
-		if err != nil {
-			return nil, err
-		}
-		return func() {
-			ui.model.SetSession(session)
-			ui.refreshProfiles()
-		}, nil
-	})
-	return true
-}
-
-// tryCreateVault validates and starts the first-run vault registration flow.
-func (ui *Window) tryCreateVault() bool {
-	if ui.busy {
-		return false
-	}
-	name, password := strings.TrimSpace(ui.setupName.Text()), ui.setupPassword.Text()
-	if err := validateVaultCredentials(name, password); err != nil {
-		ui.model.Error = err.Error()
-		return false
-	}
-	bootstrap, err := ui.setupBootstrap()
-	if err != nil {
-		ui.model.Error = err.Error()
-		return false
-	}
-	service := ui.model.Service
-	ui.async("Creating encrypted vault...", func(ctx context.Context) (func(), error) {
-		registration, err := service.Register(ctx, bootstrap, name, password, &config.Store{})
-		if err != nil {
-			return nil, err
-		}
-		return func() { ui.model.SetRegistration(registration) }, nil
-	})
-	return true
-}
-
-// tryRotateRecovery validates and starts recovery-key credential rotation.
-func (ui *Window) tryRotateRecovery() bool {
-	if ui.busy {
-		return false
-	}
-	key := strings.TrimSpace(ui.recoveryKey.Text())
-	name := strings.TrimSpace(ui.recoveryName.Text())
-	password := ui.recoveryPassword.Text()
-	if err := validateRecoveryCredentials(key, name, password); err != nil {
-		ui.model.Error = err.Error()
-		return false
-	}
-	service := ui.model.Service
-	ui.async("Rotating recovery credentials...", func(ctx context.Context) (func(), error) {
-		registration, err := service.Recover(ctx, key, name, password)
-		if err != nil {
-			return nil, err
-		}
-		return func() { ui.model.SetRegistration(registration) }, nil
-	})
-	return true
-}
-
 // tryRemoteSignIn validates and starts remote authentication sign-in.
 func (ui *Window) tryRemoteSignIn() bool {
 	if ui.busy {
@@ -391,61 +271,14 @@ func (ui *Window) tryRemoteSignIn() bool {
 		if err != nil {
 			return nil, err
 		}
-		resources, err := session.Resources(ctx)
+		overview, err := session.ResourcesOverview(ctx)
 		if err != nil {
 			_ = session.Logout(ctx)
 			return nil, err
 		}
 		return func() {
 			ui.remotePassword.SetText("")
-			ui.activateRemoteSession(session, resources)
-		}, nil
-	})
-	return true
-}
-
-// trySSHConnect validates the profile and starts an interactive PTY session.
-func (ui *Window) trySSHConnect() bool {
-	if ui.busy {
-		return false
-	}
-	profile, err := ui.sshProfile()
-	if err != nil {
-		ui.model.Error = err.Error()
-		return false
-	}
-	ui.closeSSH()
-	terminalCtx, terminalCancel := context.WithCancel(context.Background())
-	ui.terminalCtx = terminalCtx
-	ui.terminalCancel = terminalCancel
-	ui.async("Connecting to SSH host...", func(ctx context.Context) (func(), error) {
-		client := sshclient.NewClient(profile)
-		client.SetTimeout(20 * time.Second)
-		if err := client.Connect(); err != nil {
-			terminalCancel()
-			_ = client.Close()
-			return nil, err
-		}
-		terminal, err := client.OpenPTY(terminalCtx, 100, 30)
-		if err != nil {
-			terminalCancel()
-			_ = client.Close()
-			return nil, err
-		}
-		if err := terminalCtx.Err(); err != nil {
-			_ = terminal.Close()
-			_ = client.Close()
-			return nil, err
-		}
-		return func() {
-			if ui.terminalCtx != terminalCtx || terminalCtx.Err() != nil {
-				_ = terminal.Close()
-				_ = client.Close()
-				return
-			}
-			ui.ssh, ui.terminal = client, terminal
-			ui.appendTerminal(ui.text("Connected to ") + profile.Host + "\n")
-			ui.readTerminal(terminal)
+			ui.activateRemoteSession(session, overview.Resources, overview.SSHEnabled)
 		}, nil
 	})
 	return true

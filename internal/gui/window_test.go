@@ -12,24 +12,6 @@ import (
 	"s12ryt-ssh/internal/securestore"
 )
 
-func TestStorageProfilePreservesPathStyle(t *testing.T) {
-	ui := NewWindow(nil)
-	ui.storageName.SetText("r2")
-	ui.storageEndpoint.SetText("https://account.r2.cloudflarestorage.com")
-	ui.storageAccess.SetText("access")
-	ui.storageSecret.SetText("secret")
-	ui.storageBucket.SetText("data")
-	ui.storagePathStyle = true
-
-	profile, err := ui.storageProfile()
-	if err != nil {
-		t.Fatalf("storageProfile() error = %v", err)
-	}
-	if !profile.UsePathStyle {
-		t.Fatal("storageProfile() lost the path-style setting")
-	}
-}
-
 func TestWindowLoadsOnlyNonSensitiveRemoteLoginPreferences(t *testing.T) {
 	remotePath := filepath.Join(t.TempDir(), "remote-preferences.json")
 	if err := remote.SavePreferences(remotePath, remote.Preferences{
@@ -38,7 +20,7 @@ func TestWindowLoadsOnlyNonSensitiveRemoteLoginPreferences(t *testing.T) {
 		t.Fatal(err)
 	}
 	remoteService := remote.NewService(remotePath, securestore.NewMemoryStore(), nil)
-	ui := NewWindowWithServices(nil, remoteService, "")
+	ui := NewWindowWithPreferences(remoteService, "")
 	if ui.remoteURL.Text() != "https://auth.example.com" || ui.remoteUsername.Text() != "alice" {
 		t.Fatalf("remote login fields = url %q username %q", ui.remoteURL.Text(), ui.remoteUsername.Text())
 	}
@@ -83,14 +65,12 @@ func TestRemoteWorkspaceStringsTranslateToTraditionalChinese(t *testing.T) {
 	ui := NewWindow(nil)
 	ui.language = "zh-TW"
 	sources := []string{
-		"Remote sign in",
 		"Sign in with authentication service",
 		"Use a complete HTTP or HTTPS URL. The password is never saved.",
 		"Authentication service URL",
 		"Account",
 		"Sign in remotely",
 		"Restore saved session",
-		"Back",
 		"Remote workspace",
 		"Assigned connections",
 		"No assigned connections.",
@@ -153,30 +133,12 @@ func TestActivateRemoteSessionSelectsFirstUsableStorageResource(t *testing.T) {
 		{ID: "disabled", Name: "Disabled", Kind: "s3", Enabled: false, Operations: []remote.Operation{remote.OperationS3Read}},
 		{ID: "database", Name: "Database", Kind: "mysql", Enabled: true, Operations: []remote.Operation{remote.OperationSQLQuery}},
 		{ID: "storage", Name: "Storage", Kind: "s3", Enabled: true, Operations: []remote.Operation{remote.OperationS3Read}},
-	})
+	}, false)
 	if ui.model.Screen != ScreenRemoteWorkspace || ui.model.Tab != TabStorage {
 		t.Fatalf("remote state = screen %v tab %v", ui.model.Screen, ui.model.Tab)
 	}
 	if ui.remoteIndex != 2 {
 		t.Fatalf("selected resource index = %d, want 2", ui.remoteIndex)
-	}
-}
-
-func TestToggleStoragePathStyleAffectsProfile(t *testing.T) {
-	ui := NewWindow(nil)
-	ui.storageName.SetText("r2")
-	ui.storageEndpoint.SetText("https://account.r2.cloudflarestorage.com")
-	ui.storageAccess.SetText("access")
-	ui.storageSecret.SetText("secret")
-	ui.storageBucket.SetText("data")
-
-	ui.toggleStoragePathStyle()
-	profile, err := ui.storageProfile()
-	if err != nil {
-		t.Fatalf("storageProfile() error = %v", err)
-	}
-	if !profile.UsePathStyle {
-		t.Fatal("path-style toggle was not reflected in the storage profile")
 	}
 }
 
@@ -215,38 +177,5 @@ func TestWindowLanguagePreferenceDefaultsAndToggles(t *testing.T) {
 	}
 	if _, ok := saved["password"]; ok {
 		t.Fatal("preferences must not contain password")
-	}
-}
-
-func TestLocalValidationMessagesAreStableTranslationSources(t *testing.T) {
-	ui := NewWindow(nil)
-
-	if _, err := ui.setupBootstrap(); err == nil || err.Error() != "S3 endpoint, bucket, access key, and secret key are required" {
-		t.Fatalf("empty S3 bootstrap error = %v", err)
-	}
-
-	ui.setupBackend = "sql"
-	ui.setupDBKind = dbTypePostgres
-	ui.setupDBHost.SetText("localhost")
-	ui.setupDBUser.SetText("user")
-	ui.setupDBPassword.SetText("password")
-	ui.setupDBDatabase.SetText("app")
-	if _, err := ui.setupBootstrap(); err == nil || err.Error() != "SQL host, port, user, password, and database are required" {
-		t.Fatalf("incomplete SQL bootstrap error = %v", err)
-	}
-
-	ui.setupDBPort.SetText("not-a-port")
-	if _, err := ui.setupBootstrap(); err == nil || err.Error() != "port must be between 1 and 65535" {
-		t.Fatalf("invalid port error = %v", err)
-	}
-
-	if err := validateVaultCredentials("", ""); err == nil || err.Error() != "vault name and password are required" {
-		t.Fatalf("empty vault credentials error = %v", err)
-	}
-	if err := validateLoginCredentials("", ""); err == nil || err.Error() != "vault name and password are required" {
-		t.Fatalf("empty login credentials error = %v", err)
-	}
-	if err := validateRecoveryCredentials("", "", ""); err == nil || err.Error() != "recovery key, new vault name, and new vault password are required" {
-		t.Fatalf("empty recovery credentials error = %v", err)
 	}
 }
