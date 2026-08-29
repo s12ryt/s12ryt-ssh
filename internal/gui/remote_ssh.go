@@ -350,16 +350,14 @@ func (ui *Window) attachSSHTerminal(client *sshclient.Client, term ptyTerminal) 
 	ui.model.Status = "SSH terminal connected."
 }
 
+// remoteSSHView renders the main SSH pane only. The host sidebar is drawn by
+// remoteWorkspaceView; rendering it here as well duplicated the sidebar and
+// broke click handling.
 func (ui *Window) remoteSSHView(gtx layout.Context) layout.Dimensions {
-	return layout.Flex{Axis: layout.Horizontal, Gap: gtx.Dp(12)}.Layout(gtx,
-		layout.Rigid(func(gtx layout.Context) layout.Dimensions { return ui.remoteSSHSidebar(gtx) }),
-		layout.Flexed(1, func(gtx layout.Context) layout.Dimensions {
-			if ui.terminal != nil {
-				return ui.remoteSSHTerminalView(gtx)
-			}
-			return ui.remoteSSHFormView(gtx)
-		}),
-	)
+	if ui.terminal != nil {
+		return ui.remoteSSHTerminalView(gtx)
+	}
+	return ui.remoteSSHFormView(gtx)
 }
 
 func (ui *Window) remoteSSHSidebar(gtx layout.Context) layout.Dimensions {
