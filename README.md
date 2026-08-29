@@ -9,7 +9,7 @@ Windows 優先的 Go 桌面 SSH 工作區，使用 Gio GUI，並整合 S3/R2 物
 - SSH 密碼或私鑰認證、主機 key fingerprint 驗證、互動式 PTY 終端與視窗調整。
 - S3 相容儲存，包括 Cloudflare R2、AWS S3、MinIO：列表、上傳、下載與刪除。
 - MySQL/PostgreSQL：資料表列表、Query 與 Exec。
-- 可選的 Node.js 22 身分驗證服務：由 Telegram Bot 管理子帳號、S3/SQL 連線、細粒度權限、裝置 session 與安全稽核。
+- 可選的 Node.js 22 身分驗證服務：由 Telegram Bot 管理子帳號、S3/SQL 連線、細粒度權限、裝置 session 與安全稽核；服務端程式碼位於獨立倉庫 [s12ryt-ssh-auth-server](https://github.com/s12ryt/s12ryt-ssh-auth-server)。
 - GUI 的「登入校驗」模式只接收服務 URL、帳號與密碼；登入後只顯示已授權的 S3/SQL 資源，遠端憑證不會下發到桌面客戶端。
 - 首次設定精靈：選擇 R2/S3 或遠端 SQL 作為 vault backend，測試 bootstrap 連線並建立 vault。
 - 一次性復原金鑰，可在忘記密碼時輪換 vault 名稱、密碼與復原金鑰。
@@ -33,16 +33,7 @@ go vet ./...
 go build ./...
 ```
 
-Node 身分驗證服務：
-
-```powershell
-Set-Location server
-npm ci
-npm run typecheck
-npm run lint
-npm test
-npm run build
-```
+Node 身分驗證服務位於獨立倉庫 [s12ryt-ssh-auth-server](https://github.com/s12ryt/s12ryt-ssh-auth-server)，建置與驗證方式請見該倉庫的 README。
 
 `-H windowsgui` 會隱藏 Windows 主控台視窗。安全儲存與 GUI 發行流程以 Windows 為首要支援目標。
 
@@ -73,13 +64,13 @@ Node 服務是遠端 S3/SQL credentials 的唯一信任邊界。桌面 GUI 只�
 快速啟動摘要：
 
 1. 安裝 Node.js `22.13+` 與 npm。
-2. 進入 `server/`，執行 `npm ci`。
+2. Clone 身分驗證服務倉庫 [s12ryt-ssh-auth-server](https://github.com/s12ryt/s12ryt-ssh-auth-server)，執行 `npm ci`。
 3. 將 `.env.example` 複製為 `.env`，填入 Telegram Bot token、最高管理員 numeric user ID 與 32-byte Base64 主金鑰。
 4. 執行 `npm run build` 與 `npm start`。
 5. 正式環境使用 Caddy、Nginx 或 Cloudflare Tunnel 終止 HTTPS，並只信任明確設定的 proxy。
 6. 最高管理員在 Telegram 私聊 Bot 建立子帳號、connection 與 grant；使用者再從 GUI 點選「登入校驗」。
 
-完整的環境變數、Bot 指令、connection 精靈、REST API、HTTPS 部署與安全模型請見 [`server/README.md`](server/README.md)。
+完整的環境變數、Bot 指令、connection 精靈、REST API、HTTPS 部署與安全模型請見 [s12ryt-ssh-auth-server](https://github.com/s12ryt/s12ryt-ssh-auth-server) 的 README。
 
 產生 32-byte Base64 主金鑰的 Node 指令：
 
@@ -335,7 +326,6 @@ internal/ssh/             SSH host key、逾時與 PTY
 internal/storage/         S3/R2 與記憶體儲存
 internal/database/        MySQL/PostgreSQL/SQLite client
 internal/remote/          遠端登入、token 輪換與 S3/SQL 代理 client
-server/                   Node 22 Fastify、Telegram Bot、SQLite 與代理服務
 agent/                   需求契約與工作紀錄
 ```
 
@@ -348,17 +338,7 @@ go vet ./...
 
 測試涵蓋 vault 加密與復原輪換、securestore、SSH fingerprint/逾時/PTY、S3 分頁、資料庫 DSN/TLS/關閉防護、service workflow 與 GUI state/profile 行為。
 
-Node 服務驗證：
-
-```powershell
-Set-Location server
-npm run format:check
-npm run lint
-npm run typecheck
-npm test
-npm run build
-npm audit --omit=dev --audit-level=high
-```
+Node 身分驗證服務的驗證流程請見 [s12ryt-ssh-auth-server](https://github.com/s12ryt/s12ryt-ssh-auth-server) 倉庫。
 
 本機 Windows 防毒曾誤判 `internal/i18n` 的 Go 測試執行檔，因此該 package 的測試由 GitHub Actions Windows runner 執行；其他 Go 套件仍可在本機個別驗證。
 
@@ -368,6 +348,3 @@ npm audit --omit=dev --audit-level=high
 - [golang.org/x/crypto/ssh](https://pkg.go.dev/golang.org/x/crypto/ssh)：SSH。
 - [aws-sdk-go-v2](https://github.com/aws/aws-sdk-go-v2)：S3/R2。
 - [database/sql](https://pkg.go.dev/database/sql)：資料庫連線抽象。
-- [Fastify](https://fastify.dev/)：Node 身分驗證 REST API。
-- [grammY](https://grammy.dev/)：Telegram Bot long polling 與 inline keyboard。
-- [node:sqlite](https://nodejs.org/api/sqlite.html)：服務自身的 SQLite 儲存。
