@@ -206,3 +206,58 @@
   - 遠端 SSH：主機列表、新增、編輯（憑證留空不變更）、刪除、連線（下發憑證、fingerprint 首次確認後寫回服務端、PTY 終端、逾時、關閉）。
   - 新增行為依 RED→GREEN 測試；i18n 英/繁字典完整覆蓋新 key；README 反映新架構（單一遠端入口、SSH 憑證下發的安全模型說明）。
 - 不在範圍：SSH 服務端代理/WebSocket、本機 Vault 資料遷移、S3/SQL 憑證下發、管理員查看使用者 SSH 主機、SSH tunnel。
+
+## 需求：移除遠端工作區 S3/SQL 分頁並修復 SSH 分頁 UI（2026-08-29）
+
+使用者原話：「把"S3兼容和SQL"的查詢或什麼那個拿掉,然後ssh的地方似乎ui壞掉了」。
+
+### 已確認需求（使用者答复）
+
+1. **S3/SQL 移除範圍＝全部移除**：GUI 的 S3/R2 與 SQL 分頁、internal/remote 的 S3/SQL proxy client 方法一併刪除；服務端倉庫 s12ryt-ssh-auth-server 不動（其 S3/SQL connection 功能不受影響，僅桌面客戶端不再提供操作介面）。
+2. **帳號未啟用 SSH（SSHEnabled=false）**：登入後仍進入遠端工作區，顯示「此帳號未啟用 SSH 存取。」提示，保留登出能力；不建立其他分頁。
+3. **SSH UI 症狀＝雙側欄 bug**：remoteSSHSidebar 在 remoteWorkspaceView 與 remoteSSHView 各渲染一次，導致側欄重複、點擊 hit area 重疊。修法為 remoteSSHView 移除內部 sidebar。
+
+### 設計決策
+
+- Tab 機制（Tab/TabSSH/TabStorage/TabDatabase/SelectTab）隨分頁移除而刪除：工作區只剩 SSH 一種內容，以 SSHEnabled 布林決定顯示 SSH 主區或停用提示。
+- remoteResourceIndices/remoteAllows/resource 過濾邏輯刪除：工作區不再依 resource 決定可用操作。
+- internal/remote 保留 ResourcesOverview 與 Resource.Operations（[]Operation 純字串型別）：SSHEnabled 來自 /resources 端點，auth_test.go 以 Resources 驗證 token 輪換；作業常數（s3.read 等）與 Resource.Allows 無人使用，刪除。
+- activateRemoteSession 改簽名 (session, sshEnabled)：登入/還原成功後設 SSHEnabled；啟用時自動 refreshSSHHosts（僅首次、sshHosts 為空時），未啟用時設 Status 提示。
+- 登出清除 sshHosts/sshHostButtons，避免下次登入顯示前帳號的主機。
+- i18n 刪除 S3/SQL/資源列表相關 key（含 KeyBytes），新增 KeySSHDisabled（英 "SSH access is not enabled for this account." / 繁「此帳號未啟用 SSH 存取。」）；i18n_test.go 同步（本機不跑，交 CI）。
+- README 清理：移除 S3/SQL 設定、vault 精靈、復原金鑰、server/ 目錄等已不存在功能的描述，改為遠端登入 + SSH 工作區的現況。
+
+### 驗收條件
+
+- GUI：登入後工作區只有 SSH 側欄＋主區（表單或終端），無重複側欄；SSHEnabled=false 顯示停用提示且可登出。
+- internal/remote 不再存在 ListObjects/UploadObject/DownloadObject/DeleteObject/Tables/Query/Exec 與對應測試；go build ./... 與 go vet ./... 無錯。
+- go test（gui/remote/config/securestore/ssh/root）全綠；新增 TestActivateRemoteSessionRefreshesSSHHostsWhenEnabled 於 RED 失敗、GREEN 通過。
+- i18n 字典英/繁同步，無殘留已刪 key（CI 驗證）。
+- 不主動 commit/push。
+
+## 需求：修復關閉視窗後的幽靈進程（2026-08-29）
+
+使用者原話：「你排查一下為什麼我關閉後在後台還有幽靈進程」。
+
+### 排查結論（已向使用者回報並確認）
+
+- 症狀：關閉視窗後進程永久殘留（幾分鐘以上，需手動結束）；關閉前狀態為已登入但未開終端；網路正常；exe 為 GitHub v0.1.3。
+- 已排除：logout 請求卡住（doJSON 以 NewRequestWithContext 綁 ctx、Logout 冪等單請求、5s 上限）、SSH/PTY 關閉卡住（冪等非阻塞）、events channel 滿（緩衝 8）、Gio 已知 hang issue（查無）。
+- **根因（Gio v0.10.2 源碼證實）**：`app/os_windows.go` 的 `osMain()` 為 `processURLEvent(startupURI()); select{}` —— `select{}` 永久阻塞 main goroutine。本專案 `main.go` 在 `go func(){ result <- controller.Run(window) }()` 之後呼叫 `gioapp.Main()` 再 `return <-result`：視窗關閉後 `controller.Run` 正常返回、logout 正常完成，但 main goroutine 卡死在 `app.Main()` 內永遠不返回，進程因此永久存活。
+
+### 已確認需求（使用者答覆）
+
+1. **與 S3/SQL 移除、SSH UI 修復同批交付**（同一輪 TDD、同一次交付）。
+2. **Logout 等待策略＝同步但縮短為 2 秒**：`Close()` 的 logout context 逾時由 5s 改 2s；主修為 main.go 進程退出結構。
+
+### 設計決策
+
+- `main.go` 改為 Gio 官方標準模式：`main()` 只呼叫 `gioapp.Main()`；背景 goroutine 執行 `run()`（內部建 window、跑 `controller.Run`），返回後依錯誤 `os.Exit(1)`（附 stderr 訊息）或 `os.Exit(0)`，顯式終止含阻塞中 main goroutine 在內的整個進程。刪除 result channel。
+- `internal/gui/window.go` `Close()`：logout `context.WithTimeout` 由 5s 縮短為 2s。
+- TDD 例外：main.go 為進程入口（os.Exit 與 Gio 事件迴圈無法於單測隔離驗證），以編譯、`go vet`、回歸測試與代碼審查（對照 Gio v0.10.2 `osMain` 源碼）作為替代驗證，於完成報告列明。
+
+### 驗收條件
+
+- 關閉視窗後進程必定退出：網路正常時立即退出；網路異常時最遲約 2 秒退出（logout 逾時）。
+- `go build ./...`、`go vet ./...` 通過；既有 gui 測試（含 `TestCloseCancelsInteractiveTerminalContext`）不回歸。
+- 不主動 commit/push。

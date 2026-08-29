@@ -161,3 +161,18 @@
   - `2f67070` 修正 i18n 測試（SSH、S3 / R2 專有名詞不翻譯屬正確行為）。
 - TDD 證據：服務端各週期 RED→GREEN（migration 2 測試、ssh-host-service 14、http-ssh-api 7、bot 2）；主倉庫 KeyData 3 測試 RED（unknown field KeyData）→綠、remote client 3 測試 RED（undefined 方法）→綠、GUI remote_ssh 6 測試 RED→綠、i18n 重寫經 CI 驗證綠。
 - 事故與修復：主倉庫首次 push run 33240969975 i18n 測試要求專有名詞翻譯→刪 2 條 sources（2f67070）；首次 commit 曾混入 staged 刪除檔案→reset 重提。
+## 2026-08-29：移除遠端工作區 S3/SQL、修復 SSH 分頁雙側欄與關閉後幽靈進程
+
+- 使用者需求（三項同批交付，契約見 agent/question.md 對應章節）：
+  1. 移除遠端工作區 S3/R2 與 SQL 分頁（GUI 與 internal/remote client 一併移除；服務端倉庫不動）。
+  2. 修復 SSH 分頁 UI：remoteSSHSidebar 在 remoteWorkspaceView 與 remoteSSHView 被重複渲染兩次（同一批 widget.Clickable 同幀繪製導致點擊錯亂）。
+  3. 修復關閉視窗後幽靈進程：Gio v0.10.2 app/os_windows.go 的 osMain 為 select{} 永久阻塞 main goroutine；main.go 改 Gio 標準退出模式（背景 goroutine os.Exit、main 只調 app.Main()、刪 result chan）；window.go Close() logout 逾時 5s 縮短為 2s。
+- GUI 變更：model.go 刪 Tab/SelectTab 與介面 S3/SQL 七方法；window.go 刪 S3/SQL 欄位與函數（保留 remoteList/terminalList/confirm modal/async/pump）；remote_window.go 重寫（558→144 行；activateRemoteSession(session, sshEnabled)、SSH 唯一內容區、SSHEnabled=false 顯示 remoteSSHDisabledView 提示）；remote_ssh.go remoteSSHView 移除內部 sidebar Rigid（雙側欄修復）；ui_upgrade.go 刪 requireObjectKey/requireSQLStatement/objectsHeader/selectRemoteObject 並改 tryRemoteSignIn 呼叫新簽名。
+- internal/remote：刪 proxy.go/proxy_test.go；models.go 刪 S3Object/UploadResult/Download/SQLQueryResult/SQLExecResult、6 個 Operation 常數與 Resource.Allows（Operation type 與 Resource/ResourcesOverview 保留供 /resources 解析）；auth/service/client/preferences 不動。
+- internal/i18n：刪 47 個 S3/SQL/tab keys、新增 KeySSHDisabled（"SSH access is not enabled for this account."／「此帳號未啟用 SSH 存取。」）；i18n_test.go 同步（本機防毒不跑，交 CI 驗證）。
+- main.go：Gio 標準模式（main 只調 gioapp.Main()；背景 goroutine err:=run() 後 os.Exit(0/1)；run() 直接 return controller.Run(window)）。
+- TDD 證據：RED（go test ./internal/gui 編譯失敗——fakeRemoteSession 缺 DeleteObject、activateRemoteSession 簽名不符）→ GREEN（TestActivateRemoteSessionRefreshesSSHHostsWhenEnabled 等 gui 測試全綠）。過程修正一處測試寫法：select 直接收走 ui.events 的 event 會讓 pump 無事可做，改為輪詢 len(ui.events) 後由 pump 自行消費。
+- TDD 例外：SSH 雙側欄（Gio layout 無幀測試基礎）與 main.go 進程退出（入口碼）以編譯＋vet＋回歸＋對照 Gio v0.10.2 源碼審查替代，詳 agent/question.md。
+- 回歸：go build ./...、go vet ./...、go test（gui/remote/config/securestore/ssh/root）全綠；internal/i18n 交 GitHub CI。
+- README.md 重寫為現況（遠端登入唯一入口＋SSH 工作區＋未啟用提示＋關閉即退出＋實際專案結構與本機資料說明）。
+- git：未 commit/push（依慣例待使用者要求）。

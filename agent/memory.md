@@ -141,3 +141,11 @@
 - git（GIT_MASTER=1）：主倉庫 5 提交（ff1f9cf/19fa791/2a3fd03/8a7b53d/2f67070）推送；服務端 5 提交（147a0c0/1195519/e5c7994/6b100ad/68d732d）推送。
 - CI：主倉庫 run 33241097108 全綠（修復 33240969975 的 i18n 專有名詞斷言）；服務端 run 33239399313 success。
 - 驗證：兩倉庫本地測試全綠（internal/i18n 除外——本機防毒誤判 fork/exec，交 CI）；go vet ./...、go build ./...、npm typecheck/lint/build 全綠。
+## 2026-08-29：移除 S3/SQL 與幽靈進程修復（檔案操作）
+
+- 讀取：internal/gui/{model,window,remote_window,remote_ssh,ui_upgrade}.go 與 {model,window,ui_upgrade}_test.go、internal/remote/{models,auth,client,service,preferences}.go、internal/i18n/{i18n,i18n_test}.go、main.go、README.md、agent/{項目表,deep_todos,memory}.md；Gio v0.10.2 app/app.go 與 app/os_windows.go（幽靈進程根因驗證：osMain 的 select{} 永久阻塞）。
+- 寫入：internal/gui/{model,window,remote_window,remote_ssh,ui_upgrade}.go、internal/gui/{model,window,ui_upgrade}_test.go、internal/remote/models.go、internal/i18n/{i18n,i18n_test}.go、main.go、README.md、agent/question.md、agent/{項目表,deep_todos,memory}.md。
+- 刪除：internal/remote/proxy.go、internal/remote/proxy_test.go（PowerShell Remove-Item）。
+- 測試修正：window_test.go TestActivateRemoteSessionRefreshesSSHHostsWhenEnabled 由 select 收 event 改為輪詢 len(ui.events) 後 pump()（原因：select 消費 event 後 pump 讀不到任何事件、apply 不執行）。
+- 驗證：go build ./... 與 go vet ./... 全綠；go test ./internal/gui ./internal/remote ./internal/config ./internal/securestore ./internal/ssh . 全綠；internal/i18n 本機防毒不跑、交 CI。
+- git：無 commit/push；工作樹含本輪變更（README、main.go、internal/{gui,remote,i18n} 與 agent 紀錄）。
