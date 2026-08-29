@@ -72,31 +72,34 @@ func (ui *Window) handleRemoteWorkspace(gtx layout.Context) {
 }
 
 func (ui *Window) remoteLoginView(gtx layout.Context) layout.Dimensions {
-	return ui.surface(gtx, func(gtx layout.Context) layout.Dimensions {
-		return layout.Inset{Top: unit.Dp(36), Bottom: unit.Dp(36), Left: unit.Dp(42), Right: unit.Dp(42)}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
-			return layout.Center.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
-				return layout.Flex{Axis: layout.Vertical, Gap: gtx.Dp(14)}.Layout(gtx,
+	return layout.Center.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+		gtx.Constraints.Max.X = gtx.Dp(loginCardWidth)
+		return ui.surface(gtx, func(gtx layout.Context) layout.Dimensions {
+			return layout.Inset{Top: unit.Dp(cardPaddingLoose), Bottom: unit.Dp(cardPaddingLoose), Left: unit.Dp(cardPaddingLoose), Right: unit.Dp(cardPaddingLoose)}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+				return layout.Flex{Axis: layout.Vertical, Gap: gtx.Dp(cardGap)}.Layout(gtx,
 					layout.Rigid(func(gtx layout.Context) layout.Dimensions {
 						return material.H5(ui.theme, ui.text("Sign in with authentication service")).Layout(gtx)
 					}),
 					layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-						return material.Body2(ui.theme, ui.text("Use a complete HTTP or HTTPS URL. The password is never saved.")).Layout(gtx)
+						label := material.Body2(ui.theme, ui.text("Use a complete HTTP or HTTPS URL. The password is never saved."))
+						label.Color = colorMuted
+						return label.Layout(gtx)
 					}),
 					layout.Rigid(func(gtx layout.Context) layout.Dimensions { return ui.status(gtx) }),
 					layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-						return ui.field(gtx, &ui.remoteURL, "Authentication service URL", true, false)
+						return ui.labeledField(gtx, &ui.remoteURL, "Authentication service URL", true, false)
 					}),
 					layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-						return ui.field(gtx, &ui.remoteUsername, "Account", true, false)
+						return ui.labeledField(gtx, &ui.remoteUsername, "Account", true, false)
 					}),
 					layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-						return ui.field(gtx, &ui.remotePassword, "Password", true, true)
+						return ui.labeledField(gtx, &ui.remotePassword, "Password", true, true)
 					}),
 					layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-						return ui.actionButton(gtx, &ui.remoteLogin, "Sign in remotely", true, false)
+						return ui.actionButtonBlock(gtx, &ui.remoteLogin, "Sign in remotely", true, false)
 					}),
 					layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-						return ui.button(gtx, &ui.remoteRestore, "Restore saved session", false)
+						return ui.buttonBlock(gtx, &ui.remoteRestore, "Restore saved session", false)
 					}),
 				)
 			})
@@ -105,16 +108,25 @@ func (ui *Window) remoteLoginView(gtx layout.Context) layout.Dimensions {
 }
 
 func (ui *Window) remoteWorkspaceView(gtx layout.Context) layout.Dimensions {
-	return layout.Flex{Axis: layout.Vertical, Gap: gtx.Dp(12)}.Layout(gtx,
+	return layout.Flex{Axis: layout.Vertical, Gap: gtx.Dp(sectionGap)}.Layout(gtx,
 		layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-			return material.Body2(ui.theme, ui.text("Remote account: ")+ui.model.RemoteAccountName).Layout(gtx)
+			return layout.Flex{Axis: layout.Horizontal, Gap: gtx.Dp(rowGap), Alignment: layout.Middle}.Layout(gtx,
+				layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+					return ui.fieldLabel(gtx, "Remote account: ")
+				}),
+				layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+					label := material.Body1(ui.theme, ui.model.RemoteAccountName)
+					label.Color = colorText
+					return label.Layout(gtx)
+				}),
+			)
 		}),
 		layout.Rigid(func(gtx layout.Context) layout.Dimensions { return ui.status(gtx) }),
 		layout.Flexed(1, func(gtx layout.Context) layout.Dimensions {
 			if !ui.model.SSHEnabled {
 				return ui.remoteSSHDisabledView(gtx)
 			}
-			return layout.Flex{Axis: layout.Horizontal, Gap: gtx.Dp(12)}.Layout(gtx,
+			return layout.Flex{Axis: layout.Horizontal, Gap: gtx.Dp(cardGap)}.Layout(gtx,
 				layout.Rigid(func(gtx layout.Context) layout.Dimensions {
 					return ui.remoteSSHSidebar(gtx)
 				}),

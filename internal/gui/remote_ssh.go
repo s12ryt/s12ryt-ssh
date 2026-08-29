@@ -364,8 +364,8 @@ func (ui *Window) remoteSSHSidebar(gtx layout.Context) layout.Dimensions {
 	return ui.surface(gtx, func(gtx layout.Context) layout.Dimensions {
 		gtx.Constraints.Min.X = gtx.Dp(230)
 		gtx.Constraints.Max.X = gtx.Dp(270)
-		return layout.Inset{Top: unit.Dp(14), Bottom: unit.Dp(14), Left: unit.Dp(14), Right: unit.Dp(14)}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
-			return layout.Flex{Axis: layout.Vertical, Gap: gtx.Dp(8)}.Layout(gtx,
+		return layout.Inset{Top: unit.Dp(cardPadding), Bottom: unit.Dp(cardPadding), Left: unit.Dp(cardPadding), Right: unit.Dp(cardPadding)}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+			return layout.Flex{Axis: layout.Vertical, Gap: gtx.Dp(rowGap)}.Layout(gtx,
 				layout.Rigid(func(gtx layout.Context) layout.Dimensions {
 					return material.Subtitle1(ui.theme, ui.text("SSH hosts")).Layout(gtx)
 				}),
@@ -374,11 +374,12 @@ func (ui *Window) remoteSSHSidebar(gtx layout.Context) layout.Dimensions {
 						return material.Body2(ui.theme, ui.text("No SSH hosts yet.")).Layout(gtx)
 					}
 					return ui.remoteList.Layout(gtx, len(ui.sshHosts), func(gtx layout.Context, index int) layout.Dimensions {
+						gtx.Constraints.Min.X = gtx.Constraints.Max.X
 						return ui.button(gtx, &ui.sshHostButtons[index], ui.sshHosts[index].Name, ui.sshHostIndex == index)
 					})
 				}),
 				layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-					return ui.button(gtx, &ui.sshNew, "New host", false)
+					return ui.buttonBlock(gtx, &ui.sshNew, "New host", false)
 				}),
 			)
 		})
@@ -387,51 +388,54 @@ func (ui *Window) remoteSSHSidebar(gtx layout.Context) layout.Dimensions {
 
 func (ui *Window) remoteSSHFormView(gtx layout.Context) layout.Dimensions {
 	return ui.surface(gtx, func(gtx layout.Context) layout.Dimensions {
-		return layout.Inset{Top: unit.Dp(16), Bottom: unit.Dp(16), Left: unit.Dp(18), Right: unit.Dp(18)}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
-			return layout.Flex{Axis: layout.Vertical, Gap: gtx.Dp(8)}.Layout(gtx,
-				layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-					return material.Subtitle1(ui.theme, ui.text("SSH host details")).Layout(gtx)
-				}),
-				layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-					return ui.editorRow(gtx, "Name", &ui.sshName, "Host", &ui.sshHost)
-				}),
-				layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-					return ui.editorRow(gtx, "Port", &ui.sshPort, "Username", &ui.sshUser)
-				}),
-				layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-					return ui.field(gtx, &ui.sshPassword, "Password", true, true)
-				}),
-				layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-					return ui.editorField(gtx, &ui.sshPrivateKey, "Private key")
-				}),
-				layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-					return ui.field(gtx, &ui.sshKeyPass, "Key passphrase", true, true)
-				}),
-				layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-					return ui.field(gtx, &ui.sshFingerprint, "Host fingerprint", true, false)
-				}),
-				layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-					return layout.Flex{Axis: layout.Horizontal, Gap: gtx.Dp(8)}.Layout(gtx,
-						layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-							return ui.button(gtx, &ui.sshSave, "Save host", true)
-						}),
-						layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-							return ui.actionButton(gtx, &ui.sshDelete, "Delete host", false, true)
-						}),
-						layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-							return ui.button(gtx, &ui.sshConnect, "Connect", false)
-						}),
-					)
-				}),
-			)
+		return layout.Inset{Top: unit.Dp(cardPadding), Bottom: unit.Dp(cardPadding), Left: unit.Dp(cardPadding), Right: unit.Dp(cardPadding)}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+			return ui.sshFormList.Layout(gtx, 1, func(gtx layout.Context, _ int) layout.Dimensions {
+				return layout.Flex{Axis: layout.Vertical, Gap: gtx.Dp(cardGap)}.Layout(gtx,
+					layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+						return material.Subtitle1(ui.theme, ui.text("SSH host details")).Layout(gtx)
+					}),
+					layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+						return ui.editorRow(gtx, "Name", &ui.sshName, "Host", &ui.sshHost)
+					}),
+					layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+						return ui.editorRow(gtx, "Port", &ui.sshPort, "Username", &ui.sshUser)
+					}),
+					layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+						return ui.labeledField(gtx, &ui.sshPassword, "Password", true, true)
+					}),
+					layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+						gtx.Constraints.Min.Y = gtx.Dp(privateKeyMinHeight)
+						return ui.labeledField(gtx, &ui.sshPrivateKey, "Private key", false, false)
+					}),
+					layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+						return ui.labeledField(gtx, &ui.sshKeyPass, "Key passphrase", true, true)
+					}),
+					layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+						return ui.labeledField(gtx, &ui.sshFingerprint, "Host fingerprint", true, false)
+					}),
+					layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+						return layout.Flex{Axis: layout.Horizontal, Gap: gtx.Dp(rowGap)}.Layout(gtx,
+							layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+								return ui.button(gtx, &ui.sshSave, "Save host", true)
+							}),
+							layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+								return ui.actionButton(gtx, &ui.sshDelete, "Delete host", false, true)
+							}),
+							layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+								return ui.button(gtx, &ui.sshConnect, "Connect", false)
+							}),
+						)
+					}),
+				)
+			})
 		})
 	})
 }
 
 func (ui *Window) remoteSSHTerminalView(gtx layout.Context) layout.Dimensions {
 	return ui.surface(gtx, func(gtx layout.Context) layout.Dimensions {
-		return layout.Inset{Top: unit.Dp(16), Bottom: unit.Dp(16), Left: unit.Dp(18), Right: unit.Dp(18)}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
-			return layout.Flex{Axis: layout.Vertical, Gap: gtx.Dp(8)}.Layout(gtx,
+		return layout.Inset{Top: unit.Dp(cardPadding), Bottom: unit.Dp(cardPadding), Left: unit.Dp(cardPadding), Right: unit.Dp(cardPadding)}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+			return layout.Flex{Axis: layout.Vertical, Gap: gtx.Dp(sectionGap)}.Layout(gtx,
 				layout.Flexed(1, func(gtx layout.Context) layout.Dimensions {
 					return ui.outputList(gtx, &ui.terminalList, ui.terminalSnapshot(), "Terminal output will appear here", true)
 				}),
