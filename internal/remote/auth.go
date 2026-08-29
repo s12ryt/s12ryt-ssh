@@ -101,13 +101,74 @@ func (s *Session) Account() Account {
 
 // Resources lists the enabled connections assigned to this account.
 func (s *Session) Resources(ctx context.Context) ([]Resource, error) {
-	var response struct {
-		Resources []Resource `json:"resources"`
-	}
-	if err := s.authorizedJSON(ctx, http.MethodGet, "/api/v1/resources", nil, &response); err != nil {
+	overview, err := s.ResourcesOverview(ctx)
+	if err != nil {
 		return nil, err
 	}
-	return response.Resources, nil
+	return overview.Resources, nil
+}
+
+// ResourcesOverview returns assigned connections plus the account SSH switch.
+func (s *Session) ResourcesOverview(ctx context.Context) (ResourcesOverview, error) {
+	var overview ResourcesOverview
+	if err := s.authorizedJSON(ctx, http.MethodGet, "/api/v1/resources", nil, &overview); err != nil {
+		return ResourcesOverview{}, err
+	}
+	return overview, nil
+}
+
+// SSHHosts lists this account's self-managed SSH hosts without credentials.
+func (s *Session) SSHHosts(ctx context.Context) ([]SSHHost, error) {
+	var response struct {
+		Hosts []SSHHost `json:"hosts"`
+	}
+	if err := s.authorizedJSON(ctx, http.MethodGet, "/api/v1/ssh/hosts", nil, &response); err != nil {
+		return nil, err
+	}
+	return response.Hosts, nil
+}
+
+// CreateSSHHost stores a new SSH host with its credentials on the server.
+func (s *Session) CreateSSHHost(ctx context.Context, input SSHHostInput) (SSHHost, error) {
+	var host SSHHost
+	if err := s.authorizedJSON(ctx, http.MethodPost, "/api/v1/ssh/hosts", input, &host); err != nil {
+		return SSHHost{}, err
+	}
+	return host, nil
+}
+
+// UpdateSSHHost updates host fields; empty credential fields keep the stored secret.
+func (s *Session) UpdateSSHHost(ctx context.Context, hostID string, input SSHHostInput) (SSHHost, error) {
+	var host SSHHost
+	if err := s.authorizedJSON(ctx, http.MethodPatch, "/api/v1/ssh/hosts/"+hostID, input, &host); err != nil {
+		return SSHHost{}, err
+	}
+	return host, nil
+}
+
+// DeleteSSHHost removes the host and its stored credentials.
+func (s *Session) DeleteSSHHost(ctx context.Context, hostID string) error {
+	return s.authorizedJSON(ctx, http.MethodDelete, "/api/v1/ssh/hosts/"+hostID, nil, nil)
+}
+
+// SSHHostCredentials fetches the one-time credential issuance for a host.
+func (s *Session) SSHHostCredentials(ctx context.Context, hostID string) (SSHHostCredentials, error) {
+	var credentials SSHHostCredentials
+	if err := s.authorizedJSON(ctx, http.MethodGet, "/api/v1/ssh/hosts/"+hostID+"/credentials", nil, &credentials); err != nil {
+		return SSHHostCredentials{}, err
+	}
+	return credentials, nil
+}
+
+// SetSSHHostFingerprint records the confirmed host key fingerprint.
+func (s *Session) SetSSHHostFingerprint(ctx context.Context, hostID, fingerprint string) error {
+	return s.authorizedJSON(ctx, http.MethodPut, "/api/v1/ssh/hosts/"+hostID+"/fingerprint", sshFingerprintRequest{
+		Fingerprint: fingerprint,
+	}, nil)
+}
+
+type sshFingerprintRequest struct {
+	Fingerprint string `json:"fingerprint"`
 }
 
 // Logout revokes the server session and always removes the local refresh token.

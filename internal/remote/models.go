@@ -52,6 +52,52 @@ func (r Resource) Allows(operation Operation) bool {
 	return false
 }
 
+// ResourcesOverview is the /resources response: assigned connections plus the account SSH switch.
+type ResourcesOverview struct {
+	Resources  []Resource `json:"resources"`
+	SSHEnabled bool       `json:"sshEnabled"`
+}
+
+// SSHHost describes one self-managed SSH host without credentials.
+type SSHHost struct {
+	ID                 string `json:"id"`
+	Name               string `json:"name"`
+	Host               string `json:"host"`
+	Port               int    `json:"port"`
+	Username           string `json:"username"`
+	HasPassword        bool   `json:"hasPassword"`
+	HasPrivateKey      bool   `json:"hasPrivateKey"`
+	HasKeyPassphrase   bool   `json:"hasKeyPassphrase"`
+	TrustedFingerprint string `json:"trustedFingerprint"`
+	CreatedAt          int64  `json:"createdAt"`
+	UpdatedAt          int64  `json:"updatedAt"`
+}
+
+// SSHHostInput is the create/update body. Empty credential fields keep the stored secret.
+type SSHHostInput struct {
+	Name               string `json:"name"`
+	Host               string `json:"host"`
+	Port               int    `json:"port"`
+	Username           string `json:"username"`
+	Password           string `json:"password,omitempty"`
+	PrivateKey         string `json:"privateKey,omitempty"`
+	KeyPassphrase      string `json:"keyPassphrase,omitempty"`
+	TrustedFingerprint string `json:"trustedFingerprint,omitempty"`
+}
+
+// SSHHostCredentials is the one-time credential issuance for a saved host.
+type SSHHostCredentials struct {
+	ID                 string `json:"id"`
+	Name               string `json:"name"`
+	Host               string `json:"host"`
+	Port               int    `json:"port"`
+	Username           string `json:"username"`
+	Password           string `json:"password"`
+	PrivateKey         string `json:"privateKey"`
+	KeyPassphrase      string `json:"keyPassphrase"`
+	TrustedFingerprint string `json:"trustedFingerprint"`
+}
+
 // S3Object is non-sensitive object metadata returned by the proxy.
 type S3Object struct {
 	Key          string `json:"key"`
