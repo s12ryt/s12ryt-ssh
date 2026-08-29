@@ -13,10 +13,16 @@ import (
 )
 
 func main() {
-	if err := run(); err != nil {
-		fmt.Fprintf(os.Stderr, "s12ryt-ssh: %v\n", err)
-		os.Exit(1)
-	}
+	// Gio's app.Main blocks forever on Windows (osMain ends in select{}), so the
+	// UI loop runs on a separate goroutine and exits the process explicitly.
+	go func() {
+		if err := run(); err != nil {
+			fmt.Fprintf(os.Stderr, "s12ryt-ssh: %v\n", err)
+			os.Exit(1)
+		}
+		os.Exit(0)
+	}()
+	gioapp.Main()
 }
 
 func run() error {
@@ -24,12 +30,7 @@ func run() error {
 	remoteService := remote.NewService(applicationRemotePreferencesPath(), secrets, nil)
 	window := new(gioapp.Window)
 	controller := gui.NewWindowWithPreferences(remoteService, applicationPreferencesPath())
-	result := make(chan error, 1)
-	go func() {
-		result <- controller.Run(window)
-	}()
-	gioapp.Main()
-	return <-result
+	return controller.Run(window)
 }
 
 func applicationPreferencesPath() string {
