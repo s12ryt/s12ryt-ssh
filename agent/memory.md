@@ -149,3 +149,12 @@
 - 測試修正：window_test.go TestActivateRemoteSessionRefreshesSSHHostsWhenEnabled 由 select 收 event 改為輪詢 len(ui.events) 後 pump()（原因：select 消費 event 後 pump 讀不到任何事件、apply 不執行）。
 - 驗證：go build ./... 與 go vet ./... 全綠；go test ./internal/gui ./internal/remote ./internal/config ./internal/securestore ./internal/ssh . 全綠；internal/i18n 本機防毒不跑、交 CI。
 - git：無 commit/push；工作樹含本輪變更（README、main.go、internal/{gui,remote,i18n} 與 agent 紀錄）。
+
+## 2026-08-29 GUI 自主美化（註記）
+
+- 寫入：internal/gui/window.go（token 常數+colorEdge+fieldLabel/labeledField+buttonBlock/actionButtonBlock+sshFormList 欄位+header/layout/surface/confirmDialog/editorRow 改版）
+- 寫入：internal/gui/remote_window.go（remoteLoginView 限寬置中卡片、remoteWorkspaceView 帳號行分層+間距 token）
+- 寫入：internal/gui/remote_ssh.go（sidebar 全寬按鈕、formView 可滾動+labeledField+私鑰最小高、terminalView 間距）
+- 寫入：agent/question.md（追加自主美化契約段）、agent/deep_todos.md、agent/memory.md、agent/項目表.md（本輪結案紀錄）
+- 教訓：Gio v0.10.2 clip.Stroke.Width 是 float32，不可給 gtx.Dp(1)（int）；edit 工具的 README directory-context 是 stale 快照
+- 未 commit/push（待使用者指示）

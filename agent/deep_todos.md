@@ -176,3 +176,14 @@
 - 回歸：go build ./...、go vet ./...、go test（gui/remote/config/securestore/ssh/root）全綠；internal/i18n 交 GitHub CI。
 - README.md 重寫為現況（遠端登入唯一入口＋SSH 工作區＋未啟用提示＋關閉即退出＋實際專案結構與本機資料說明）。
 - git：未 commit/push（依慣例待使用者要求）。
+
+## 2026-08-29 GUI 自主美化疊代（自主疊代升級授權）
+
+- [x] 跑 ui-ux-pro-max design-system 查詢（developer tool dark）→ 採 4dp 節奏間距、深色開發者風、層級清晰；保留 teal 色系
+- [x] agent/question.md 追加契約段：範圍僅 internal/gui 版面、ui.text() 字串來源不動、handler 行為不變、驗收=gofmt/build/vet/test 全綠、TDD 例外（幀渲染無幀測試基礎）
+- [x] window.go：設計 token 常數（labelTextSize/fieldGap/rowGap/sectionGap/cardGap/cardPadding/cardPaddingLoose/pagePadding/loginCardWidth/surfaceCornerRadius/privateKeyMinHeight）、colorEdge 邊框色、fieldLabel/labeledField 欄位標籤、buttonBlock/actionButtonBlock 全寬按鈕、header 重排（H5+subtitle+右側按鈕）、layout Inset pagePadding、確認框按鈕靠右、surface 圓角10+1dp 邊框、editorRow 改 labeledField
+- [x] remote_window.go：remoteLoginView 限寬 440dp 置中卡片（Center→Max.X 限寬→surface→Inset 28→Gap 16）、說明文字 colorMuted、labeledField×3、全寬按鈕；remoteWorkspaceView 帳號行分層（fieldLabel 標籤+Body1 帳號名）、間距 token 化
+- [x] remote_ssh.go：remoteSSHSidebar 主機按鈕全寬（Min.X=Max.X）、sshNew 全寬、Inset 20；remoteSSHFormView 包 sshFormList 可滾動、密碼/ passphrase/指紋改 labeledField、私鑰最小高 88dp、間距 token 化；remoteSSHTerminalView 間距 token 化
+- [x] 回歸修正：Stroke.Width 需 float32（gtx.Dp(1)→1）；gofmt -w 修 window.go 對齊
+- [x] 回歸全綠：gofmt -l 無輸出、go build/vet 通過、go test（gui/remote/config/securestore/ssh/root）全 ok；i18n 交 CI
+- 注意：edit 工具 directory-context 顯示 stale 舊版 README，以 git show HEAD:README.md 為準（磁碟已驗證為新版）

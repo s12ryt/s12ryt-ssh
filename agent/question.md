@@ -261,3 +261,36 @@
 - 關閉視窗後進程必定退出：網路正常時立即退出；網路異常時最遲約 2 秒退出（logout 逾時）。
 - `go build ./...`、`go vet ./...` 通過；既有 gui 測試（含 `TestCloseCancelsInteractiveTerminalContext`）不回歸。
 - 不主動 commit/push。
+
+## 需求：自主美化 GUI 排版（2026-08-29）
+
+### 授權與範圍
+- 使用者（m0130，經 /ui-ux-pro-max）：「自主疊代升級,整個排版都有問題啊,請你自己美化一下」→ 明確授權自主決策，依 OREO 規則擇優直接採用，不重複追問。
+- 範圍：僅 internal/gui 的版面與視覺排版；不改業務行為、handler 邏輯；ui.text() 字串來源一律不動（維持 i18n 翻譯契約）；internal/remote、internal/ssh、internal/config 不動。
+
+### 診斷的排版問題（程式碼證據）
+1. remoteLoginView 無最大寬度：editorField 設 Min.X=Max.X 全寬，1180dp 視窗下登入欄位被拉到約 1100dp，排版散架。
+2. 表單欄位無可見標籤：只有 placeholder（hint），填值後無法辨識欄位用途。
+3. remoteSSHSidebar 主機按鈕按內容寬渲染，長短主機名寬度參差。
+4. remoteSSHFormView 無滾動：MinSize 900x620 下 7 欄位＋按鈕列貼滿甚至溢出。
+5. 間距節奏混亂：8/10/12/14/16/18 混用，各視圖不一致。
+6. 確認對話框按鈕靠左，不符合桌面慣例（動作列靠右）。
+7. 工作區帳號行為單一 Body2，層級不明。
+
+### 設計方針（ui-ux-pro-max design-system 查詢結果＋桌面慣例）
+- 深色開發者工具風格；保留現有 teal 色系與全部色彩常數語意（不換色盤）。
+- 間距系統統一：4/8/12/16/20/24/32。
+- 登入卡片限寬 440dp，水平＋垂直置中；CTA（Sign in remotely）與次級（Restore saved session）全寬。
+- 欄位＝小標籤（12sp muted）＋編輯器（labeledField）。
+- 側欄主機按鈕與 New host 按鈕全寬。
+- SSH 表單改為可垂直滾動（List）；Private key 編輯器最小高度 88dp。
+- surface 卡片：圓角 10dp＋1dp 邊框（比背景亮一階的分隔感）。
+- header：H5 標題＋12sp muted 副標垂直堆疊，右側按鈕群。
+- 確認對話框按鈕靠右（spacer 推右）。
+
+### 驗收條件
+- gofmt 無 diff；go build ./... 與 go vet ./... 通過。
+- go test（gui/remote/config/securestore/ssh/root）全綠；既有測試斷言不改。
+- handler 行為（點擊、驗證、狀態、Submit）不變；欄位 hint 字串來源不變。
+- TDD 例外：版面為幀渲染，無幀測試基礎；以編譯＋回歸＋程式碼審查驗證（沿先前 GUI 版面變更之例外慣例）。
+- 不主動 commit/push（待使用者要求）。
