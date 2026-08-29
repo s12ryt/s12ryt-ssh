@@ -65,22 +65,12 @@ func TestTranslationsExistInBothLanguages(t *testing.T) {
 	}
 }
 
-func TestBytesTranslationUsesHumanReadableEnglishLabel(t *testing.T) {
-	if got := T(English, KeyBytes); got != "Bytes" {
-		t.Fatalf("English bytes label = %q, want %q", got, "Bytes")
-	}
-	if got := Text(TraditionalChinese, "Bytes"); got != "位元組" {
-		t.Fatalf("Chinese bytes label = %q, want %q", got, "位元組")
-	}
-}
-
 func TestGUIStringsTranslateToTraditionalChinese(t *testing.T) {
 	sources := []string{
 		"Secure remote workspace",
 		"Log out",
 		"Working...",
 		"Operation failed.",
-		"SQL database",
 		"Connect",
 		"SSH hosts",
 		"No SSH hosts yet.",
@@ -124,10 +114,6 @@ func TestGUIStringsTranslateToTraditionalChinese(t *testing.T) {
 		"Sign in remotely",
 		"Restore saved session",
 		"Remote workspace",
-		"Assigned connections",
-		"No assigned connections.",
-		"Assigned S3 / R2",
-		"Assigned SQL database",
 		"Remote account: ",
 		"Remote sign-in URL, account, and password are required",
 		"Signing in to authentication service...",
@@ -135,47 +121,8 @@ func TestGUIStringsTranslateToTraditionalChinese(t *testing.T) {
 		"Signing out...",
 		"Remote workspace ready.",
 		"Sign in to the remote authentication service.",
-		"Permission not granted for this operation",
-		"No connection selected",
-		"Remote objects and operation output",
-		"Remote database output",
 		"Remote authentication service is unavailable",
-		"Loading assigned connections...",
-		"List prefix",
-		"Object key",
-		"Local path",
-		"Inline upload data",
-		"Refresh list",
-		"Upload",
-		"Download",
-		"Delete",
-		"Uploaded ",
-		"Downloaded ",
-		" to ",
-		"No objects found.",
-		"%d objects",
-		"Bytes",
-		" (preview available in output)",
-		"Uploading object...",
-		"Downloading object...",
-		"Deleting object...",
-		"Listing remote objects...",
-		"Delete object",
-		"This permanently deletes the object. This action cannot be undone.",
-		"object key is required",
-		"SQL query or statement",
-		"List tables",
-		"Run query",
-		"Run exec",
-		"No rows returned.",
-		"Loading database tables...",
-		"Running database query...",
-		"Executing database statement...",
-		"Execute SQL statement",
-		"This runs a statement that can modify data. Continue?",
-		"Rows affected: ",
-		"Last insert ID: ",
-		"SQL statement is required",
+		"SSH access is not enabled for this account.",
 		"Cancel",
 		"Confirm",
 		"Show",
