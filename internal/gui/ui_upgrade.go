@@ -2,7 +2,6 @@ package gui
 
 import (
 	"context"
-	"fmt"
 	"image/color"
 	"strings"
 
@@ -179,30 +178,6 @@ func buttonColors(busy, danger bool) (background, foreground color.NRGBA) {
 	}
 }
 
-// requireObjectKey rejects a missing S3 object key before any network call.
-func requireObjectKey(key string) error {
-	if strings.TrimSpace(key) == "" {
-		return fmt.Errorf("object key is required")
-	}
-	return nil
-}
-
-// requireSQLStatement rejects a missing SQL statement before any network call.
-func requireSQLStatement(statement string) error {
-	if strings.TrimSpace(statement) == "" {
-		return fmt.Errorf("SQL statement is required")
-	}
-	return nil
-}
-
-// objectsHeader renders the object list heading with its count.
-func (ui *Window) objectsHeader(count int) string {
-	if count == 0 {
-		return ui.text("No objects found.")
-	}
-	return fmt.Sprintf(ui.text("%d objects"), count)
-}
-
 // sendTerminalInput writes the current input line to the live terminal.
 func (ui *Window) sendTerminalInput() bool {
 	if ui.terminal == nil {
@@ -222,14 +197,6 @@ func (ui *Window) sendTerminalInput() bool {
 	}
 	ui.terminalInput.SetText("")
 	return true
-}
-
-// selectRemoteObject copies a listed remote object key into the editor.
-func (ui *Window) selectRemoteObject(index int) {
-	if index < 0 || index >= len(ui.remoteObjects) {
-		return
-	}
-	ui.storageKey.SetText(ui.remoteObjects[index].Key)
 }
 
 // editorReveal pairs a secret editor's mask state with its show/hide toggle.
@@ -278,7 +245,7 @@ func (ui *Window) tryRemoteSignIn() bool {
 		}
 		return func() {
 			ui.remotePassword.SetText("")
-			ui.activateRemoteSession(session, overview.Resources, overview.SSHEnabled)
+			ui.activateRemoteSession(session, overview.SSHEnabled)
 		}, nil
 	})
 	return true

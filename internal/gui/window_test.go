@@ -5,8 +5,8 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
-	"strings"
 	"testing"
+	"time"
 
 	"s12ryt-ssh/internal/remote"
 	"s12ryt-ssh/internal/securestore"
@@ -29,38 +29,6 @@ func TestWindowLoadsOnlyNonSensitiveRemoteLoginPreferences(t *testing.T) {
 	}
 }
 
-func TestWindowFiltersAssignedResourcesByRemoteTabAndPermission(t *testing.T) {
-	ui := NewWindow(nil)
-	ui.remoteResources = []remote.Resource{
-		{ID: "s3", Name: "Storage", Kind: "s3", Enabled: true, Operations: []remote.Operation{remote.OperationS3Read}},
-		{ID: "mysql", Name: "MySQL", Kind: "mysql", Enabled: true, Operations: []remote.Operation{remote.OperationSQLTables, remote.OperationSQLQuery}},
-		{ID: "postgres", Name: "Postgres", Kind: "postgres", Enabled: false, Operations: []remote.Operation{remote.OperationSQLExec}},
-	}
-	storage := ui.remoteResourceIndices(TabStorage)
-	if len(storage) != 1 || ui.remoteResources[storage[0]].ID != "s3" {
-		t.Fatalf("storage indices = %v", storage)
-	}
-	database := ui.remoteResourceIndices(TabDatabase)
-	if len(database) != 1 || ui.remoteResources[database[0]].ID != "mysql" {
-		t.Fatalf("database indices = %v", database)
-	}
-	ui.remoteIndex = database[0]
-	if !ui.remoteAllows(remote.OperationSQLQuery) || ui.remoteAllows(remote.OperationSQLExec) {
-		t.Fatalf("remote permissions = %+v", ui.remoteResources[database[0]].Operations)
-	}
-}
-
-func TestFormatRemoteRowsUsesServerColumnOrder(t *testing.T) {
-	result := remote.SQLQueryResult{
-		Columns: []string{"id", "name"},
-		Rows:    [][]any{{float64(1), "alice"}, {float64(2), "bob"}},
-	}
-	got := formatRemoteRows(result)
-	if !strings.Contains(got, "id=1 | name=alice") || !strings.Contains(got, "id=2 | name=bob") {
-		t.Fatalf("formatted rows = %q", got)
-	}
-}
-
 func TestRemoteWorkspaceStringsTranslateToTraditionalChinese(t *testing.T) {
 	ui := NewWindow(nil)
 	ui.language = "zh-TW"
@@ -72,21 +40,11 @@ func TestRemoteWorkspaceStringsTranslateToTraditionalChinese(t *testing.T) {
 		"Sign in remotely",
 		"Restore saved session",
 		"Remote workspace",
-		"Assigned connections",
-		"No assigned connections.",
 		"Remote sign-in URL, account, and password are required",
 		"Signing in to authentication service...",
 		"Restoring remote session...",
-		"Permission not granted for this operation",
-		"No connection selected",
 		"Remote authentication service is unavailable",
-		"Loading assigned connections...",
-		"Listing remote objects...",
-		"Assigned S3 / R2",
-		"Assigned SQL database",
-		"Uploaded ",
-		"Remote objects and operation output",
-		"Remote database output",
+		"SSH access is not enabled for this account.",
 	}
 	for _, source := range sources {
 		if got := ui.text(source); got == source {
@@ -107,38 +65,36 @@ func TestRemoteCredentialValidationUsesStableTranslationSource(t *testing.T) {
 	}
 }
 
-func TestSelectedRemoteResourceRequiresEnabledGrant(t *testing.T) {
-	ui := NewWindow(nil)
-	ui.model.RemoteSession = &fakeRemoteSession{}
-	ui.remoteResources = []remote.Resource{
-		{ID: "s3", Name: "Storage", Kind: "s3", Enabled: true, Operations: []remote.Operation{remote.OperationS3Read}},
-	}
-	ui.remoteIndex = 0
-	if _, resource, err := ui.selectedRemoteResource(remote.OperationS3Read); err != nil || resource.ID != "s3" {
-		t.Fatalf("selectedRemoteResource(read) = resource %+v, error %v", resource, err)
-	}
-	if _, _, err := ui.selectedRemoteResource(remote.OperationS3Delete); err == nil || err.Error() != "Permission not granted for this operation" {
-		t.Fatalf("selectedRemoteResource(delete) error = %v", err)
-	}
-	ui.remoteResources[0].Enabled = false
-	if _, _, err := ui.selectedRemoteResource(remote.OperationS3Read); err == nil || err.Error() != "Permission not granted for this operation" {
-		t.Fatalf("disabled resource error = %v", err)
-	}
-}
-
-func TestActivateRemoteSessionSelectsFirstUsableStorageResource(t *testing.T) {
+func TestActivateRemoteSessionRefreshesSSHHostsWhenEnabled(t *testing.T) {
 	ui := NewWindow(nil)
 	session := &fakeRemoteSession{}
-	ui.activateRemoteSession(session, []remote.Resource{
-		{ID: "disabled", Name: "Disabled", Kind: "s3", Enabled: false, Operations: []remote.Operation{remote.OperationS3Read}},
-		{ID: "database", Name: "Database", Kind: "mysql", Enabled: true, Operations: []remote.Operation{remote.OperationSQLQuery}},
-		{ID: "storage", Name: "Storage", Kind: "s3", Enabled: true, Operations: []remote.Operation{remote.OperationS3Read}},
-	}, false)
-	if ui.model.Screen != ScreenRemoteWorkspace || ui.model.Tab != TabStorage {
-		t.Fatalf("remote state = screen %v tab %v", ui.model.Screen, ui.model.Tab)
+	ui.activateRemoteSession(session, true)
+	if !ui.busy {
+		t.Fatal("activateRemoteSession must refresh SSH hosts when enabled")
 	}
-	if ui.remoteIndex != 2 {
-		t.Fatalf("selected resource index = %d, want 2", ui.remoteIndex)
+	deadline := time.Now().Add(2 * time.Second)
+	for len(ui.events) == 0 {
+		if time.Now().After(deadline) {
+			t.Fatal("SSH hosts refresh did not complete")
+		}
+		time.Sleep(time.Millisecond)
+	}
+	ui.pump()
+	if len(ui.sshHosts) != 1 || ui.sshHosts[0].ID != "host-1" {
+		t.Fatalf("ssh hosts after refresh = %+v", ui.sshHosts)
+	}
+	if ui.busy {
+		t.Fatal("pump must clear the busy flag")
+	}
+
+	ui.activateRemoteSession(session, false)
+	if ui.busy {
+		t.Fatal("activateRemoteSession must not refresh SSH hosts when disabled")
+	}
+	select {
+	case <-ui.events:
+		t.Fatal("disabled session must not queue another refresh")
+	default:
 	}
 }
 

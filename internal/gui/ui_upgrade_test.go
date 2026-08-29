@@ -5,8 +5,6 @@ import (
 	"strings"
 	"testing"
 
-	"s12ryt-ssh/internal/remote"
-
 	"gioui.org/widget"
 )
 
@@ -140,27 +138,6 @@ func TestButtonColorsSignalBusyAndDanger(t *testing.T) {
 	}
 }
 
-func TestRequireObjectKeyAndSQLStatementRejectBlank(t *testing.T) {
-	if err := requireObjectKey(""); err == nil || err.Error() != "object key is required" {
-		t.Fatalf("empty object key error = %v", err)
-	}
-	if err := requireObjectKey("   "); err == nil {
-		t.Fatal("blank object key must be rejected")
-	}
-	if err := requireSQLStatement(""); err == nil || err.Error() != "SQL statement is required" {
-		t.Fatalf("empty statement error = %v", err)
-	}
-	if err := requireSQLStatement("   "); err == nil {
-		t.Fatal("blank statement must be rejected")
-	}
-	if err := requireObjectKey("backup.txt"); err != nil {
-		t.Fatalf("valid key error = %v", err)
-	}
-	if err := requireSQLStatement("SELECT 1"); err != nil {
-		t.Fatalf("valid statement error = %v", err)
-	}
-}
-
 func TestSendTerminalInputWritesLineAndClearsInput(t *testing.T) {
 	ui := NewWindow(nil)
 	terminal := &fakeTerminal{}
@@ -191,20 +168,6 @@ func TestSendTerminalInputWritesLineAndClearsInput(t *testing.T) {
 	}
 }
 
-func TestSelectRemoteObjectFillsObjectKeyEditor(t *testing.T) {
-	ui := NewWindow(nil)
-	ui.remoteObjects = []remote.S3Object{{Key: "x.txt"}, {Key: "y.txt"}}
-	ui.selectRemoteObject(1)
-	if ui.storageKey.Text() != "y.txt" {
-		t.Fatalf("remote object key after select = %q", ui.storageKey.Text())
-	}
-	ui.selectRemoteObject(-1)
-	ui.selectRemoteObject(99)
-	if ui.storageKey.Text() != "y.txt" {
-		t.Fatalf("out-of-range remote select must not change the key: %q", ui.storageKey.Text())
-	}
-}
-
 func TestTryRemoteSignInGuardsBusyAndValidation(t *testing.T) {
 	ui := NewWindow(nil)
 
@@ -231,31 +194,17 @@ func TestTryRemoteSignInGuardsBusyAndValidation(t *testing.T) {
 	}
 }
 
-func TestObjectsHeaderCountsObjects(t *testing.T) {
-	ui := NewWindow(nil)
-	if got := ui.objectsHeader(0); got != "No objects found." {
-		t.Fatalf("empty objects header = %q", got)
-	}
-	if got := ui.objectsHeader(3); got != "3 objects" {
-		t.Fatalf("objects header = %q, want %q", got, "3 objects")
-	}
-	ui.language = "zh-TW"
-	if got := ui.objectsHeader(3); !strings.Contains(got, "物件") {
-		t.Fatalf("traditional chinese objects header = %q", got)
-	}
-}
-
 func TestRequestConfirmBlocksWhileBusy(t *testing.T) {
 	ui := NewWindow(nil)
 
-	ui.requestConfirm("Delete object", "This permanently deletes the object. This action cannot be undone.", func() {})
+	ui.requestConfirm("Delete host", "This permanently deletes the SSH host. This action cannot be undone.", func() {})
 	if !ui.confirm.active {
 		t.Fatal("requestConfirm should open the confirmation modal when idle")
 	}
 	ui.confirm.cancel()
 
 	ui.busy = true
-	ui.requestConfirm("Delete object", "This permanently deletes the object. This action cannot be undone.", func() {})
+	ui.requestConfirm("Delete host", "This permanently deletes the SSH host. This action cannot be undone.", func() {})
 	if ui.confirm.active {
 		t.Fatal("requestConfirm must not open the confirmation modal while busy")
 	}
@@ -296,23 +245,14 @@ func TestUIUpgradeStringsTranslateToTraditionalChinese(t *testing.T) {
 	sources := []string{
 		"Cancel",
 		"Confirm",
-		"Delete object",
-		"This permanently deletes the object. This action cannot be undone.",
-		"Execute SQL statement",
-		"This runs a statement that can modify data. Continue?",
 		"Show",
 		"Hide",
-		"SQL statement is required",
 		"SSH terminal is not connected",
-		"%d objects",
 		"Signing out...",
 	}
 	for _, source := range sources {
 		if got := ui.text(source); got == source {
 			t.Fatalf("missing Traditional Chinese translation for %q", source)
 		}
-	}
-	if got := ui.text("object key is required"); got == "object key is required" {
-		t.Fatal("lowercase validation message must also translate")
 	}
 }

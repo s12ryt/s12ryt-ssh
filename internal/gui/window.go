@@ -39,35 +39,24 @@ var (
 
 // Window is the Gio presentation layer for the application.
 type Window struct {
-	model              *Model
-	window             *app.Window
-	theme              *material.Theme
-	ops                op.Ops
-	remoteList         layout.List
-	terminalList       layout.List
-	storageOutputList  layout.List
-	databaseOutputList layout.List
-	remoteObjectList   layout.List
-	language           i18n.Language
-	preferencesPath    string
-	languageButton     widget.Clickable
-	reveals            map[*widget.Editor]*editorReveal
+	model           *Model
+	window          *app.Window
+	theme           *material.Theme
+	ops             op.Ops
+	remoteList      layout.List
+	terminalList    layout.List
+	language        i18n.Language
+	preferencesPath string
+	languageButton  widget.Clickable
+	reveals         map[*widget.Editor]*editorReveal
 
-	sshTab      widget.Clickable
-	storageTab  widget.Clickable
-	databaseTab widget.Clickable
-	logout      widget.Clickable
+	logout widget.Clickable
 
 	remoteURL      widget.Editor
 	remoteUsername widget.Editor
 	remotePassword widget.Editor
 	remoteLogin    widget.Clickable
 	remoteRestore  widget.Clickable
-	remoteRefresh  widget.Clickable
-
-	remoteResources       []remote.Resource
-	remoteResourceButtons []widget.Clickable
-	remoteIndex           int
 
 	sshNew         widget.Clickable
 	sshSave        widget.Clickable
@@ -97,28 +86,10 @@ type Window struct {
 	terminalMu     sync.RWMutex
 	terminalSize   image.Point
 
-	confirm             confirmation
-	confirmAcceptBtn    widget.Clickable
-	confirmCancelBtn    widget.Clickable
-	confirmScrim        widget.Clickable
-	remoteObjects       []remote.S3Object
-	remoteObjectButtons []widget.Clickable
-
-	storageRefresh  widget.Clickable
-	storageUpload   widget.Clickable
-	storageDownload widget.Clickable
-	storageDelete   widget.Clickable
-	storagePrefix   widget.Editor
-	storageKey      widget.Editor
-	storagePath     widget.Editor
-	storageData     widget.Editor
-	storageText     string
-
-	databaseTables widget.Clickable
-	databaseQuery  widget.Clickable
-	databaseExec   widget.Clickable
-	databaseSQL    widget.Editor
-	databaseText   string
+	confirm          confirmation
+	confirmAcceptBtn widget.Clickable
+	confirmCancelBtn widget.Clickable
+	confirmScrim     widget.Clickable
 
 	busy   bool
 	events chan asyncEvent
@@ -154,7 +125,6 @@ func NewWindowWithPreferences(remoteService *remote.Service, preferencesPath str
 	ui := &Window{
 		model:           NewModel(remoteService),
 		theme:           th,
-		remoteIndex:     -1,
 		events:          make(chan asyncEvent, 8),
 		language:        language,
 		preferencesPath: preferencesPath,
@@ -213,7 +183,7 @@ func (ui *Window) Close() error {
 	}
 	ui.closeSSH()
 	if ui.model.RemoteSession != nil {
-		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 		remoteErr := ui.model.LogoutRemote(ctx)
 		cancel()
 		return remoteErr
@@ -462,30 +432,6 @@ func (ui *Window) status(gtx layout.Context) layout.Dimensions {
 	return style.Layout(gtx)
 }
 
-func (ui *Window) remoteResourceIndices(tab Tab) []int {
-	indices := make([]int, 0, len(ui.remoteResources))
-	for index, resource := range ui.remoteResources {
-		if !resource.Enabled {
-			continue
-		}
-		kind := strings.ToLower(strings.TrimSpace(resource.Kind))
-		if tab == TabStorage && kind == "s3" {
-			indices = append(indices, index)
-		}
-		if tab == TabDatabase && (kind == "mysql" || kind == "postgres" || kind == "postgresql") {
-			indices = append(indices, index)
-		}
-	}
-	return indices
-}
-
-func (ui *Window) remoteAllows(operation remote.Operation) bool {
-	if ui.remoteIndex < 0 || ui.remoteIndex >= len(ui.remoteResources) {
-		return false
-	}
-	return ui.remoteResources[ui.remoteIndex].Enabled && ui.remoteResources[ui.remoteIndex].Allows(operation)
-}
-
 func (ui *Window) secretLabel(gtx layout.Context, text string) layout.Dimensions {
 	style := material.Body1(ui.theme, text)
 	style.Color = colorTeal
@@ -619,12 +565,6 @@ func (ui *Window) outputList(gtx layout.Context, list *layout.List, content, hin
 	})
 }
 
-func (ui *Window) ensureRemoteObjectButtons() {
-	if len(ui.remoteObjectButtons) != len(ui.remoteObjects) {
-		ui.remoteObjectButtons = make([]widget.Clickable, len(ui.remoteObjects))
-	}
-}
-
 func (ui *Window) surface(gtx layout.Context, child layout.Widget) layout.Dimensions {
 	defer clip.UniformRRect(image.Rect(0, 0, gtx.Constraints.Max.X, gtx.Constraints.Max.Y), 8).Push(gtx.Ops).Pop()
 	paint.Fill(gtx.Ops, colorSurface)
@@ -665,33 +605,4 @@ func parsePort(value string) (int, error) {
 		return 0, fmt.Errorf("port must be between 1 and 65535")
 	}
 	return port, nil
-}
-
-func formatRemoteRows(result remote.SQLQueryResult) string {
-	if len(result.Rows) == 0 {
-		return "No rows returned."
-	}
-	var b strings.Builder
-	for rowIndex, row := range result.Rows {
-		fmt.Fprintf(&b, "%d: ", rowIndex+1)
-		for columnIndex, column := range result.Columns {
-			if columnIndex > 0 {
-				b.WriteString(" | ")
-			}
-			var value any
-			if columnIndex < len(row) {
-				value = row[columnIndex]
-			}
-			fmt.Fprintf(&b, "%s=%v", column, value)
-		}
-		b.WriteByte('\n')
-	}
-	return b.String()
-}
-
-func (ui *Window) downloadedTo(path string) string {
-	if path == "" {
-		return ui.text(" (preview available in output)")
-	}
-	return ui.text(" to ") + path
 }
