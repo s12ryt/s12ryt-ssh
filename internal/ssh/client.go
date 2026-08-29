@@ -102,6 +102,12 @@ func buildClientConfigErr(p config.SSHProfile) (*gossh.ClientConfig, error) {
 			return cfg, fmt.Errorf("ssh: load private key: %w", err)
 		}
 		cfg.Auth = append(cfg.Auth, auth)
+	} else if p.KeyData != "" {
+		auth, err := keyDataAuth([]byte(p.KeyData), p.KeyPassphrase)
+		if err != nil {
+			return cfg, fmt.Errorf("ssh: parse private key: %w", err)
+		}
+		cfg.Auth = append(cfg.Auth, auth)
 	}
 	if p.Password != "" {
 		cfg.Auth = append(cfg.Auth, gossh.Password(p.Password))

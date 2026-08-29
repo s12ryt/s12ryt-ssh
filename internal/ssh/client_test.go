@@ -368,6 +368,90 @@ func TestClient_Connect_Timeout(t *testing.T) {
 	}
 }
 
+func TestBuildClientConfig_KeyDataAuth(t *testing.T) {
+	_, priv, err := ed25519.GenerateKey(rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	keyBytes, err := gossh.MarshalPrivateKey(priv, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	p := config.SSHProfile{User: "u", KeyData: string(pem.EncodeToMemory(keyBytes))}
+	cfg := buildClientConfig(p)
+	if len(cfg.Auth) == 0 {
+		t.Fatal("expected auth methods from inline key data")
+	}
+}
+
+func TestBuildClientConfig_KeyDataWithPassphrase(t *testing.T) {
+	_, priv, err := ed25519.GenerateKey(rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	keyBytes, err := gossh.MarshalPrivateKeyWithPassphrase(priv, "", []byte("phrase"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	pemData := string(pem.EncodeToMemory(keyBytes))
+	cfg, err := buildClientConfigErr(config.SSHProfile{
+		User:           "u",
+		KeyData:        pemData,
+		KeyPassphrase:  "phrase",
+	})
+	if err != nil {
+		t.Fatalf("passphrase key: %v", err)
+	}
+	if len(cfg.Auth) == 0 {
+		t.Fatal("expected auth methods from encrypted key data")
+	}
+	if _, err := buildClientConfigErr(config.SSHProfile{
+		User:          "u",
+		KeyData:       pemData,
+		KeyPassphrase: "wrong",
+	}); err == nil {
+		t.Fatal("expected error for wrong passphrase")
+	}
+}
+
+func TestClient_ConnectAndExec_KeyData(t *testing.T) {
+	_, priv, err := ed25519.GenerateKey(rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	keyBytes, err := gossh.MarshalPrivateKey(priv, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	pub, err := gossh.NewPublicKey(ed25519.PublicKey(priv.Public().(ed25519.PublicKey)))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	cfg := newServerConfig(t, pub)
+	c := NewClient(config.SSHProfile{
+		Name:    "t",
+		Host:    "x",
+		Port:    22,
+		User:    "u",
+		KeyData: string(pem.EncodeToMemory(keyBytes)),
+	})
+	c.SetDialer(&pipeDialer{serverCfg: cfg})
+	c.SetHostKeyCallback(gossh.InsecureIgnoreHostKey())
+	if err := c.Connect(); err != nil {
+		t.Fatalf("connect: %v", err)
+	}
+	defer c.Close()
+
+	out, err := c.Exec("hi")
+	if err != nil {
+		t.Fatalf("exec: %v", err)
+	}
+	if !strings.Contains(out, "echo:hi") {
+		t.Errorf("unexpected output: %q", out)
+	}
+}
+
 func TestClient_OpenPTYInteractive(t *testing.T) {
 	c := NewClient(config.SSHProfile{Name: "t", Host: "x", Port: 22, User: "u", Password: "secret"})
 	c.SetDialer(&pipeDialer{serverCfg: newServerConfig(t, nil)})

@@ -13,8 +13,9 @@ type SSHProfile struct {
 	Port               int    `json:"port"`
 	User               string `json:"user"`
 	Password           string `json:"password,omitempty"`
-	KeyPath            string `json:"key_path,omitempty"`
-	KeyPassphrase      string `json:"key_passphrase,omitempty"`
+	KeyPath         string `json:"key_path,omitempty"`
+	KeyData         string `json:"key_data,omitempty"`
+	KeyPassphrase   string `json:"key_passphrase,omitempty"`
 	HostKeyFingerprint string `json:"host_key_fingerprint,omitempty"`
 }
 

@@ -16,7 +16,14 @@ func loadKeyAuth(keyPath, passphrase string) (gossh.AuthMethod, error) {
 	if err != nil {
 		return nil, err
 	}
+	return keyDataAuth(data, passphrase)
+}
+
+// keyDataAuth parses an in-memory private key and returns an auth method.
+// If passphrase is non-empty it is used to decrypt password-protected keys.
+func keyDataAuth(data []byte, passphrase string) (gossh.AuthMethod, error) {
 	var signer gossh.Signer
+	var err error
 	if passphrase != "" {
 		signer, err = gossh.ParsePrivateKeyWithPassphrase(data, []byte(passphrase))
 	} else {
