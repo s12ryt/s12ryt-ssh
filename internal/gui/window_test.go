@@ -113,6 +113,58 @@ func TestCloseCancelsInteractiveTerminalContext(t *testing.T) {
 	}
 }
 
+func TestQueueSSHTabApplyStopsAfterWindowClose(t *testing.T) {
+	ui := NewWindow(nil)
+	for range cap(ui.events) {
+		ui.events <- asyncEvent{}
+	}
+
+	queued := make(chan struct{})
+	go func() {
+		ui.queueSSHTabApply(func() {})
+		close(queued)
+	}()
+
+	select {
+	case <-queued:
+		t.Fatal("queue should wait while the event channel is full")
+	case <-time.After(20 * time.Millisecond):
+	}
+
+	if err := ui.Close(); err != nil {
+		t.Fatalf("Close() error = %v", err)
+	}
+	select {
+	case <-queued:
+	case <-time.After(time.Second):
+		t.Fatal("queued SSH work must stop waiting after window close")
+	}
+
+	cleaned := false
+	ui.queueSSHTabApply(func() {}, func() { cleaned = true })
+	if !cleaned {
+		t.Fatal("discarded SSH work must release its captured resources")
+	}
+}
+
+func TestWindowCloseCleansQueuedSSHTabResources(t *testing.T) {
+	ui := NewWindow(nil)
+	cleaned := false
+	if !ui.queueSSHTabApply(func() {}, func() { cleaned = true }) {
+		t.Fatal("SSH work should queue while the window is open")
+	}
+	if cleaned {
+		t.Fatal("queued SSH resources must remain available until the event is consumed")
+	}
+
+	if err := ui.Close(); err != nil {
+		t.Fatalf("Close() error = %v", err)
+	}
+	if !cleaned {
+		t.Fatal("closing the window must release resources owned by unconsumed SSH events")
+	}
+}
+
 func TestWindowLanguagePreferenceDefaultsAndToggles(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "preferences.json")
 	ui := NewWindowWithPreferences(nil, path)

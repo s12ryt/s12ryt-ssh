@@ -56,17 +56,19 @@ const (
 
 // Window is the Gio presentation layer for the application.
 type Window struct {
-	model           *Model
-	window          *app.Window
-	theme           *material.Theme
-	ops             op.Ops
-	remoteList      layout.List
-	sshFormList     layout.List
-	terminalList    layout.List
-	language        i18n.Language
-	preferencesPath string
-	languageButton  widget.Clickable
-	reveals         map[*widget.Editor]*editorReveal
+	model            *Model
+	window           *app.Window
+	theme            *material.Theme
+	ops              op.Ops
+	remoteList       layout.List
+	sshFormList      layout.List
+	terminalList     layout.List
+	terminalTabList  layout.List
+	sshHostStripList layout.List
+	language         i18n.Language
+	preferencesPath  string
+	languageButton   widget.Clickable
+	reveals          map[*widget.Editor]*editorReveal
 
 	logout widget.Clickable
 
@@ -91,26 +93,39 @@ type Window struct {
 	sshKeyPass     widget.Editor
 	sshFingerprint widget.Editor
 
-	sshHosts       []remote.SSHHost
-	sshHostButtons []widget.Clickable
-	sshHostIndex   int
-	sshHostID      string
-	terminalInput  widget.Editor
-	terminalText   string
-	terminal       ptyTerminal
-	ssh            *sshclient.Client
-	terminalCtx    context.Context
-	terminalCancel context.CancelFunc
-	terminalMu     sync.RWMutex
-	terminalSize   image.Point
+	sshHosts            []remote.SSHHost
+	sshHostButtons      []widget.Clickable
+	sshHostEditButtons  []widget.Clickable
+	sshHostIndex        int
+	sshHostID           string
+	sshTabs             sshTabStore
+	sshFormOpen         bool
+	sshFormOriginal     sshFormValues
+	sshFormCloseButton  widget.Clickable
+	sshFormCancelButton widget.Clickable
+	sshFormScrim        widget.Clickable
+	terminalInput       widget.Editor
+	terminalText        string
+	terminal            ptyTerminal
+	ssh                 *sshclient.Client
+	terminalCtx         context.Context
+	terminalCancel      context.CancelFunc
+	terminalMu          sync.RWMutex
+	terminalSize        image.Point
 
 	confirm          confirmation
 	confirmAcceptBtn widget.Clickable
 	confirmCancelBtn widget.Clickable
 	confirmScrim     widget.Clickable
 
-	busy   bool
-	events chan asyncEvent
+	busy              bool
+	events            chan asyncEvent
+	closed            chan struct{}
+	closeOnce         sync.Once
+	eventMu           sync.Mutex
+	closing           bool
+	nextSSHApplyID    uint64
+	pendingSSHApplies map[uint64]func()
 }
 
 type asyncEvent struct {
@@ -144,6 +159,7 @@ func NewWindowWithPreferences(remoteService *remote.Service, preferencesPath str
 		model:           NewModel(remoteService),
 		theme:           th,
 		events:          make(chan asyncEvent, 8),
+		closed:          make(chan struct{}),
 		language:        language,
 		preferencesPath: preferencesPath,
 	}
@@ -176,7 +192,7 @@ func (ui *Window) toggleLanguage() error {
 // Run attaches the controller to a Gio window and processes its event loop.
 func (ui *Window) Run(window *app.Window) error {
 	ui.window = window
-	window.Option(app.Title("s12ryt SSH"), app.Size(unit.Dp(1180), unit.Dp(760)), app.MinSize(unit.Dp(900), unit.Dp(620)))
+	window.Option(app.Title("s12ryt SSH"), app.Size(unit.Dp(1180), unit.Dp(760)), app.MinSize(unit.Dp(680), unit.Dp(560)))
 	for {
 		switch e := window.Event().(type) {
 		case app.DestroyEvent:
@@ -199,6 +215,21 @@ func (ui *Window) Close() error {
 	if ui == nil {
 		return nil
 	}
+	ui.closeOnce.Do(func() {
+		ui.eventMu.Lock()
+		ui.closing = true
+		if ui.closed != nil {
+			close(ui.closed)
+		}
+		pending := ui.pendingSSHApplies
+		ui.pendingSSHApplies = nil
+		ui.eventMu.Unlock()
+		for _, cleanup := range pending {
+			if cleanup != nil {
+				cleanup()
+			}
+		}
+	})
 	ui.closeSSH()
 	if ui.model.RemoteSession != nil {
 		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
@@ -209,7 +240,47 @@ func (ui *Window) Close() error {
 	return nil
 }
 
+func (ui *Window) registerSSHTabApply(cleanup func()) (uint64, bool) {
+	ui.eventMu.Lock()
+	defer ui.eventMu.Unlock()
+	if ui.closing {
+		return 0, false
+	}
+	if ui.pendingSSHApplies == nil {
+		ui.pendingSSHApplies = make(map[uint64]func())
+	}
+	ui.nextSSHApplyID++
+	id := ui.nextSSHApplyID
+	ui.pendingSSHApplies[id] = cleanup
+	return id, true
+}
+
+func (ui *Window) claimSSHTabApply(id uint64) bool {
+	ui.eventMu.Lock()
+	defer ui.eventMu.Unlock()
+	if _, ok := ui.pendingSSHApplies[id]; !ok {
+		return false
+	}
+	delete(ui.pendingSSHApplies, id)
+	return true
+}
+
+func (ui *Window) discardSSHTabApply(id uint64) {
+	ui.eventMu.Lock()
+	cleanup, ok := ui.pendingSSHApplies[id]
+	if ok {
+		delete(ui.pendingSSHApplies, id)
+	}
+	ui.eventMu.Unlock()
+	if ok && cleanup != nil {
+		cleanup()
+	}
+}
+
 func (ui *Window) closeSSH() {
+	for len(ui.sshTabs.tabs) > 0 {
+		ui.sshTabs.close(ui.sshTabs.tabs[0].ID)
+	}
 	if ui.terminalCancel != nil {
 		ui.terminalCancel()
 		ui.terminalCancel = nil
@@ -285,9 +356,6 @@ func (ui *Window) async(status string, work func(context.Context) (func(), error
 }
 
 func (ui *Window) handle(gtx layout.Context) {
-	if ui.languageButton.Clicked(gtx) {
-		_ = ui.toggleLanguage()
-	}
 	if ui.confirm.active {
 		if ui.confirmScrim.Clicked(gtx) || ui.confirmCancelBtn.Clicked(gtx) {
 			ui.confirm.cancel()
@@ -296,6 +364,15 @@ func (ui *Window) handle(gtx layout.Context) {
 			ui.confirm.accept()
 		}
 		return
+	}
+	if ui.sshFormOpen {
+		if ui.model.Screen == ScreenRemoteWorkspace && ui.model.SSHEnabled {
+			ui.handleSSHHostForm(gtx)
+		}
+		return
+	}
+	if ui.languageButton.Clicked(gtx) {
+		_ = ui.toggleLanguage()
 	}
 	switch ui.model.Screen {
 	case ScreenRemoteLogin:
@@ -342,9 +419,74 @@ func (ui *Window) layout(gtx layout.Context) {
 			layout.Flexed(1, func(gtx layout.Context) layout.Dimensions { return ui.content(gtx) }),
 		)
 	})
+	if ui.sshFormOpen && ui.model.Screen == ScreenRemoteWorkspace && ui.model.SSHEnabled {
+		ui.sshHostFormModal(gtx)
+	}
 	if ui.confirm.active {
 		ui.confirmModal(gtx)
 	}
+}
+
+func (ui *Window) sshHostFormModal(gtx layout.Context) layout.Dimensions {
+	scrim := color.NRGBA{R: 0, G: 0, B: 0, A: 150}
+	return layout.Stack{Alignment: layout.Center}.Layout(gtx,
+		layout.Expanded(func(gtx layout.Context) layout.Dimensions {
+			return ui.sshFormScrim.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+				paint.FillShape(gtx.Ops, scrim, clip.Rect{Max: gtx.Constraints.Max}.Op())
+				return layout.Dimensions{Size: gtx.Constraints.Max}
+			})
+		}),
+		layout.Stacked(func(gtx layout.Context) layout.Dimensions {
+			return ui.sshHostFormDialog(gtx)
+		}),
+	)
+}
+
+func (ui *Window) sshHostFormDialog(gtx layout.Context) layout.Dimensions {
+	gtx.Constraints.Max.X = min(gtx.Constraints.Max.X, gtx.Dp(680))
+	gtx.Constraints.Max.Y = min(gtx.Constraints.Max.Y, gtx.Dp(680))
+	return ui.surface(gtx, func(gtx layout.Context) layout.Dimensions {
+		return layout.Inset{Top: unit.Dp(cardPadding), Bottom: unit.Dp(cardPadding), Left: unit.Dp(cardPadding), Right: unit.Dp(cardPadding)}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+			return layout.Flex{Axis: layout.Vertical, Gap: gtx.Dp(rowGap)}.Layout(gtx,
+				layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+					return layout.Flex{Axis: layout.Horizontal, Alignment: layout.Middle}.Layout(gtx,
+						layout.Flexed(1, func(gtx layout.Context) layout.Dimensions {
+							title := material.H6(ui.theme, ui.text("Edit SSH host"))
+							if ui.sshHostID == "" {
+								title = material.H6(ui.theme, ui.text("New SSH host"))
+							}
+							title.Color = colorText
+							return title.Layout(gtx)
+						}),
+						layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+							return ui.button(gtx, &ui.sshFormCloseButton, "Close", false)
+						}),
+					)
+				}),
+				layout.Rigid(func(gtx layout.Context) layout.Dimensions { return ui.status(gtx) }),
+				layout.Flexed(1, func(gtx layout.Context) layout.Dimensions {
+					return ui.sshHostFormFields(gtx)
+				}),
+				layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+					return layout.Flex{Axis: layout.Horizontal, Alignment: layout.Middle, Gap: gtx.Dp(rowGap)}.Layout(gtx,
+						layout.Flexed(1, func(gtx layout.Context) layout.Dimensions { return layout.Dimensions{} }),
+						layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+							return ui.button(gtx, &ui.sshFormCancelButton, "Cancel", false)
+						}),
+						layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+							return ui.button(gtx, &ui.sshSave, "Save host", true)
+						}),
+						layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+							if ui.sshHostID == "" {
+								return layout.Dimensions{}
+							}
+							return ui.actionButton(gtx, &ui.sshDelete, "Delete host", false, true)
+						}),
+					)
+				}),
+			)
+		})
+	})
 }
 
 // confirmModal overlays a dimmed scrim with the destructive-action dialog.

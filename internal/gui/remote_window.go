@@ -52,6 +52,8 @@ func (ui *Window) activateRemoteSession(session RemoteSession, sshEnabled bool) 
 
 func (ui *Window) handleRemoteWorkspace(gtx layout.Context) {
 	if ui.logout.Clicked(gtx) {
+		ui.closeSSH()
+		ui.closeSSHHostForm()
 		session := ui.model.RemoteSession
 		ui.asyncAlways("Signing out...", func(ctx context.Context) (func(), error) {
 			var err error
@@ -62,6 +64,7 @@ func (ui *Window) handleRemoteWorkspace(gtx layout.Context) {
 				ui.model.finishRemoteLogout()
 				ui.sshHosts = nil
 				ui.sshHostButtons = nil
+				ui.sshHostEditButtons = nil
 			}, err
 		})
 		return
@@ -125,6 +128,17 @@ func (ui *Window) remoteWorkspaceView(gtx layout.Context) layout.Dimensions {
 		layout.Flexed(1, func(gtx layout.Context) layout.Dimensions {
 			if !ui.model.SSHEnabled {
 				return ui.remoteSSHDisabledView(gtx)
+			}
+			widthDp := int(float32(gtx.Constraints.Max.X) / gtx.Metric.PxPerDp)
+			if useSSHHostStrip(widthDp) {
+				return layout.Flex{Axis: layout.Vertical, Gap: gtx.Dp(cardGap)}.Layout(gtx,
+					layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+						return ui.remoteSSHHostStrip(gtx)
+					}),
+					layout.Flexed(1, func(gtx layout.Context) layout.Dimensions {
+						return ui.remoteSSHView(gtx)
+					}),
+				)
 			}
 			return layout.Flex{Axis: layout.Horizontal, Gap: gtx.Dp(cardGap)}.Layout(gtx,
 				layout.Rigid(func(gtx layout.Context) layout.Dimensions {
