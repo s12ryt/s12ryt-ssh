@@ -187,3 +187,16 @@
 - [x] 回歸修正：Stroke.Width 需 float32（gtx.Dp(1)→1）；gofmt -w 修 window.go 對齊
 - [x] 回歸全綠：gofmt -l 無輸出、go build/vet 通過、go test（gui/remote/config/securestore/ssh/root）全 ok；i18n 交 CI
 - 注意：edit 工具 directory-context 顯示 stale 舊版 README，以 git show HEAD:README.md 為準（磁碟已驗證為新版）
+
+## 2026-08-30：SSH 工作區定向排版與美化
+
+- [x] 需求契約寫入 `agent/question.md`：常駐主機清單、窄版水平主機列、分頁式終端、主機表單 modal、同主機多連線、每分頁獨立資源、失敗重試、dirty-close 與關閉時完整釋放；保留 remote/ssh/config API、憑證與 TOFU 行為。
+- [x] `ssh_workspace_state.go`：新增每分頁 SSH/PTY/input/output/session 狀態、active/close/retry/endSession、stale reader 身分檢查、RWMutex 與響應式 900dp 門檻。
+- [x] `remote_ssh.go` / `remote_window.go`：主機按鈕直接建立新終端分頁、獨立 Edit、New/Edit/Delete modal、寬版 sidebar、窄版 horizontal strip、tab bar/toolbar/status/Retry、登出關閉全部 SSH session。
+- [x] `window.go`：modal 優先攔截背景操作、680x560 最小視窗、SSH 非同步事件關閉訊號與 pending cleanup 所有權管理，避免視窗關閉後 goroutine 阻塞或已建立 client/PTY 洩漏。
+- [x] `ui_upgrade.go`：確認對話由覆蓋式狀態改為 FIFO 佇列，避免多個終端同時觸發 TOFU/dirty-close 時遺失前一個確認。
+- [x] `internal/i18n`：補齊 SSH 工作區、終端狀態、Retry、Edit 與表單關閉確認的英/繁中文字典。
+- [x] TDD RED 證據：狀態型別缺失、dirty-close helper 缺失、單分頁資源釋放、獨立 input、字典缺字、穩定狀態來源、PTY 結束身分檢查、關閉時 blocked queue、已入列資源 cleanup、FIFO confirmation 均先以目標測試確認預期失敗，再完成 GREEN；`TestSendSSHTabInputWritesOnlyToRequestedTab` 為實作後回歸測試，不列為 RED 證據。
+- [x] 回歸：`go test ./... -count=1` 七個 package 全綠；`go vet ./...`、`go build ./...` 通過；本輪 Go 檔 gofmt 無差異；`git diff --check` 通過。
+- 限制：`go test -race ./internal/gui` 因本機沒有 gcc 無法執行；gopls 未安裝；未手動啟動 Gio 桌面幀，依契約以狀態測試、build 與 layout 程式碼審查替代。既有 `internal/config/config.go`、`internal/ssh/client_test.go` 格式問題未納入本次範圍。
+- git：使用者已確認將本批變更拆成 5 個原子提交並直接推送 `origin/main`；遠端同步結果以 GitHub 與最終報告為準。

@@ -158,3 +158,14 @@
 - 寫入：agent/question.md（追加自主美化契約段）、agent/deep_todos.md、agent/memory.md、agent/項目表.md（本輪結案紀錄）
 - 教訓：Gio v0.10.2 clip.Stroke.Width 是 float32，不可給 gtx.Dp(1)（int）；edit 工具的 README directory-context 是 stale 快照
 - 未 commit/push（待使用者指示）
+
+## 2026-08-30 SSH 工作區定向美化（檔案操作）
+
+- 讀取：`agent/{question,deep_todos,項目表,memory}.md`、README、`internal/gui/{window,remote_window,remote_ssh,ui_upgrade,model}.go` 與相關測試、`internal/i18n/{i18n,i18n_test}.go`；查閱 Gio v0.10.2 Escape key 與 horizontal List 文件。
+- 新增：`internal/gui/ssh_workspace_state.go`、`internal/gui/ssh_workspace_state_test.go`（多終端分頁狀態、獨立資源、併發保護、dirty form、responsive threshold 與生命週期測試）。
+- 寫入：`internal/gui/{window,window_test,remote_window,remote_ssh,ui_upgrade,ui_upgrade_test}.go`、`internal/i18n/{i18n,i18n_test}.go`、README、`agent/question.md` 與 agent 三份紀錄。
+- TDD：完成多分頁狀態、指定 session 釋放、表單 dirty-close、i18n、穩定狀態來源、PTY EOF/stale reader、Window Close queue cleanup、pending resource cleanup、FIFO confirmation 等 RED→GREEN 週期；指定 tab input 測試屬實作後回歸。
+- 品質修復：關閉視窗時釋放所有 tab；非同步 dial 結果以 pending cleanup 所有權管理；TOFU 確認改 FIFO；tab store 加 RWMutex；舊 reader 不能污染重試後的新 session。
+- 驗證：`go test ./... -count=1` 七個 package 全綠；`go vet ./...`、`go build ./...` 通過；本輪 Go 檔 gofmt 無差異；`git diff --check` 通過。
+- 未完整驗證：race detector 因缺少 gcc 無法執行；gopls 未安裝；未手動啟動 Gio 桌面幀（依契約以自動測試、build 與程式碼審查替代）。
+- git：使用者已確認將本批變更拆成 5 個原子提交並直接推送 `origin/main`；推送後需確認工作樹乾淨且本地與遠端 SHA 一致。

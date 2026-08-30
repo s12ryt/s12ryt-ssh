@@ -294,3 +294,47 @@
 - handler 行為（點擊、驗證、狀態、Submit）不變；欄位 hint 字串來源不變。
 - TDD 例外：版面為幀渲染，無幀測試基礎；以編譯＋回歸＋程式碼審查驗證（沿先前 GUI 版面變更之例外慣例）。
 - 不主動 commit/push（待使用者要求）。
+
+## 需求：SSH 工作區定向排版與美化（2026-08-30）
+
+### 需求與範圍
+
+- 使用者指出目前 SSH UI 仍像 MVP，要求定向排版與美化。
+- 範圍涵蓋完整 SSH 工作區：remote workspace 頂部、常駐主機清單、PTY 終端區與主機表單。
+- 主要修改範圍限 `internal/gui`；保留 `internal/remote`、`internal/ssh`、`internal/config` 的公開 API 與既有驗證、憑證保存、TOFU fingerprint、timeout 行為。
+- 不新增外部 UI 依賴或圖示資產；沿用現有 dark teal 配色、spacing tokens 與 Gio 元件慣例。
+
+### 已確認的互動契約
+
+- 工作區改為終端工作站風格：寬視窗左側常駐主機清單、右側終端分頁；窄視窗改為上方可水平捲動的主機列與終端內容。
+- 點擊主機名稱或主機主按鈕，每次都建立一個新的終端分頁並自動連線；同一主機允許同時存在多個分頁，不去重且不設人工上限。
+- 每個分頁擁有獨立 SSH/PTY 連線、輸出、輸入編輯器與生命週期；切換分頁不斷線，只有關閉該分頁才關閉它的連線與資源。
+- 連線失敗的分頁保留，顯示錯誤並提供 Retry 與 Close；Retry 重用原分頁，不污染其他分頁。非同步回應只可套用至仍存在的分頁。
+- 每個終端分頁都有獨立 Close 控制，不增加關閉確認。
+- 主機列每列提供獨立的主機連線按鈕與 Edit 控制；Edit 不會建立終端分頁。New host 開啟新增表單。
+- 主機表單改為 modal，支援新增與編輯；編輯 modal 內可刪除主機。儲存只保存資料並刷新主機清單，不自動連線。
+- 刪除主機只影響主機清單與後續新連線；該主機既有終端分頁與 SSH/PTY 連線必須保留。
+- modal 支援右上 Close、點擊遮罩與 Escape；若有未儲存變更，三種離開方式都先要求確認是否捨棄。modal 開啟時攔截背景操作。
+- 沿用現有欄位驗證、更新時空白憑證代表保留既有憑證、secret reveal、fingerprint confirmation 與刪除確認語意。
+
+### 排版與狀態要求
+
+- 寬視窗終端區包含可識別的 tab bar、active tab content、主機/endpoint/連線狀態工具列及 active tab 的輸入列。
+- 分頁標題至少顯示主機名稱；同名主機或同主機多連線時需能穩定區分，例如附加序號。
+- 窄視窗的主機列與終端 tab bar 必須可水平捲動或以穩定尺寸呈現，不得文字或按鈕互相擠壓、溢出或改變固定格式元件尺寸。
+- 明確呈現 connecting、connected、error、closed 等可觀察狀態；loading 或錯誤不可遮蔽其他分頁。
+- 維持現有 ANSI/OSC 過濾、輸出上限與單行輸入邊界；本需求不擴張為完整 terminal emulator，也不新增 Ctrl-C、方向鍵或 curses 支援。
+- 視窗關閉或登出時，必須可重入地關閉所有現存本地 SSH/PTY 分頁與相關 context，避免 goroutine 或資源泄漏。
+
+### TDD 與驗收條件
+
+- 先新增可隔離測試的 state/helper 行為，確認測試因缺少多分頁、狀態、modal dirty-close 或響應式行為而 RED；再以最小實作達成 GREEN，最後在測試保護下 REFACTOR。
+- 必須涵蓋：多分頁不互相污染、同主機可多連線、tab close 只關閉自身、失敗 tab retry/close、刪除主機不關閉既有 tab、modal dirty-close、主機列寬窄排版狀態及所有 tab 關閉。
+- 執行 `gofmt`、受影響測試、`go test ./... -count=1`、`go vet ./...` 與 `go build ./...`；不得引入新增錯誤。
+- 幀渲染沒有既有單測基礎，視覺結果以 Gio layout 程式碼審查、尺寸約束與狀態轉換測試替代；本限制需於完成報告明列。
+- 不主動 commit 或 push。
+
+### GitHub 發佈確認（2026-08-30）
+
+- 使用者已明確選擇將本批 SSH UI 變更拆成原子提交後，直接推送至目前追蹤的 `origin/main`。
+- 不建立功能分支或 Pull Request；推送前必須確認完整測試、vet、build、gofmt 與 `git diff --check` 均無本輪新增錯誤。
