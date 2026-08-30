@@ -140,3 +140,27 @@ func TestGUIStringsTranslateToTraditionalChinese(t *testing.T) {
 		t.Fatalf("external error was translated: %q", got)
 	}
 }
+
+func TestSSHWorkspaceStringsTranslateToTraditionalChinese(t *testing.T) {
+	sources := []string{
+		"SSH terminal workspace",
+		"Select an SSH host to open a terminal tab.",
+		"Close",
+		"Connecting",
+		"Connected",
+		"Connection failed",
+		"Use Retry to try this host again, or Close to remove this tab.",
+		"Connecting to SSH host...",
+		"Edit",
+		"New host",
+		"New SSH host",
+		"Edit SSH host",
+		"Discard changes?",
+		"This SSH host form has unsaved changes.",
+	}
+	for _, source := range sources {
+		if got := Text(TraditionalChinese, source); got == source {
+			t.Errorf("SSH workspace string %q was not translated", source)
+		}
+	}
+}
