@@ -111,18 +111,33 @@ type confirmation struct {
 	title   string
 	message string
 	action  func()
+	queue   []confirmationRequest
+}
+
+type confirmationRequest struct {
+	title   string
+	message string
+	action  func()
 }
 
 func (c *confirmation) request(title, message string, action func()) {
+	request := confirmationRequest{title: title, message: message, action: action}
+	if c.active {
+		c.queue = append(c.queue, request)
+		return
+	}
+	c.show(request)
+}
+
+func (c *confirmation) show(request confirmationRequest) {
 	c.active = true
-	c.title = title
-	c.message = message
-	c.action = action
+	c.title = request.title
+	c.message = request.message
+	c.action = request.action
 }
 
 func (c *confirmation) cancel() {
-	c.active = false
-	c.action = nil
+	c.advance()
 }
 
 func (c *confirmation) accept() {
@@ -130,8 +145,21 @@ func (c *confirmation) accept() {
 		return
 	}
 	action := c.action
-	c.cancel()
+	c.advance()
 	action()
+}
+
+func (c *confirmation) advance() {
+	if len(c.queue) == 0 {
+		c.active = false
+		c.title = ""
+		c.message = ""
+		c.action = nil
+		return
+	}
+	next := c.queue[0]
+	c.queue = c.queue[1:]
+	c.show(next)
 }
 
 // editorRowStackBelowDp is the form width under which paired editor fields

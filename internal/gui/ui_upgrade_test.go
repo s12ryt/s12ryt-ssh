@@ -95,16 +95,19 @@ func TestConfirmationRequestAcceptCancelLifecycle(t *testing.T) {
 	c.request("first", "message", func() { runs += 1 })
 	c.request("second", "message", func() { runs += 10 })
 	c.accept()
-	if runs != 10 {
-		t.Fatalf("latest request must win: runs = %d, want 10", runs)
+	if runs != 1 {
+		t.Fatalf("first queued request must run first: runs = %d, want 1", runs)
 	}
-	if c.active {
-		t.Fatal("accept must deactivate the confirmation")
+	if !c.active || c.title != "second" {
+		t.Fatalf("second request must remain queued: active %v title %q", c.active, c.title)
 	}
-	runs = 0
 	c.accept()
-	if runs != 0 {
-		t.Fatal("accept twice must not re-run the action")
+	if runs != 11 || c.active {
+		t.Fatalf("second queued request = runs %d active %v, want 11 and false", runs, c.active)
+	}
+	c.accept()
+	if runs != 11 {
+		t.Fatal("accept after the queue drains must not re-run an action")
 	}
 }
 
