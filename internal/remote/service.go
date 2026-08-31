@@ -37,8 +37,13 @@ func (s *Service) Preferences() (Preferences, error) {
 	return LoadPreferences(s.preferencesPath)
 }
 
-// Login authenticates with a password and persists only URL, username, device ID, and refresh token.
+// Login authenticates without remembering the supplied password.
 func (s *Service) Login(ctx context.Context, rawURL, username, password string) (*Session, error) {
+	return s.LoginWithOptions(ctx, rawURL, username, password, false)
+}
+
+// LoginWithOptions authenticates and optionally remembers the password in the secure store.
+func (s *Service) LoginWithOptions(ctx context.Context, rawURL, username, password string, rememberPassword bool) (*Session, error) {
 	if s == nil || s.secrets == nil {
 		return nil, errors.New("remote: secure store is required")
 	}
@@ -62,6 +67,16 @@ func (s *Service) Login(ctx context.Context, rawURL, username, password string) 
 	if err != nil {
 		return nil, err
 	}
+	passwordKey := rememberedPasswordKey(client.BaseURL(), username, deviceID)
+	if rememberPassword {
+		err = s.secrets.Save(passwordKey, []byte(password))
+	} else {
+		err = s.secrets.Delete(passwordKey)
+	}
+	if err != nil {
+		_ = session.Logout(ctx)
+		return nil, err
+	}
 	if err := SavePreferences(s.preferencesPath, Preferences{
 		BaseURL: client.BaseURL(), Username: username, DeviceID: deviceID,
 	}); err != nil {
@@ -69,6 +84,44 @@ func (s *Service) Login(ctx context.Context, rawURL, username, password string) 
 		return nil, err
 	}
 	return session, nil
+}
+
+// RememberedPassword loads the optional DPAPI-backed remote login password.
+func (s *Service) RememberedPassword() (string, error) {
+	if s == nil || s.secrets == nil {
+		return "", errors.New("remote: secure store is required")
+	}
+	preferences, err := s.Preferences()
+	if err != nil {
+		return "", err
+	}
+	if preferences.BaseURL == "" || preferences.Username == "" || preferences.DeviceID == "" {
+		return "", ErrNoPreferences
+	}
+	password, err := s.secrets.Load(rememberedPasswordKey(preferences.BaseURL, preferences.Username, preferences.DeviceID))
+	if err != nil {
+		return "", err
+	}
+	value := string(password)
+	for i := range password {
+		password[i] = 0
+	}
+	return value, nil
+}
+
+// ForgetRememberedPassword removes the optional saved remote login password.
+func (s *Service) ForgetRememberedPassword() error {
+	if s == nil || s.secrets == nil {
+		return errors.New("remote: secure store is required")
+	}
+	preferences, err := s.Preferences()
+	if err != nil {
+		return err
+	}
+	if preferences.BaseURL == "" || preferences.Username == "" || preferences.DeviceID == "" {
+		return ErrNoPreferences
+	}
+	return s.secrets.Delete(rememberedPasswordKey(preferences.BaseURL, preferences.Username, preferences.DeviceID))
 }
 
 // Restore rotates a DPAPI-backed refresh token using the saved URL, username, and device ID.
