@@ -56,27 +56,54 @@ const (
 
 // Window is the Gio presentation layer for the application.
 type Window struct {
-	model            *Model
-	window           *app.Window
-	theme            *material.Theme
-	ops              op.Ops
-	remoteList       layout.List
-	sshFormList      layout.List
-	terminalList     layout.List
-	terminalTabList  layout.List
-	sshHostStripList layout.List
-	language         i18n.Language
-	preferencesPath  string
-	languageButton   widget.Clickable
-	reveals          map[*widget.Editor]*editorReveal
+	model                               *Model
+	window                              *app.Window
+	theme                               *material.Theme
+	terminalAppearance                  terminalAppearance
+	terminalAppearanceOpen              bool
+	terminalAppearanceForm              terminalAppearanceFormValues
+	terminalAppearanceList              layout.List
+	terminalAppearanceFont              widget.Editor
+	terminalAppearanceFontSize          widget.Editor
+	terminalAppearanceForeground        widget.Editor
+	terminalAppearanceBackground        widget.Editor
+	terminalAppearanceUseAccountDefault widget.Bool
+	terminalAppearanceClose             widget.Clickable
+	terminalAppearanceCancel            widget.Clickable
+	terminalAppearanceSave              widget.Clickable
+	terminalAppearanceScrim             widget.Clickable
+	ops                                 op.Ops
+	remoteList                          layout.List
+	sshFormList                         layout.List
+	terminalList                        layout.List
+	terminalTabList                     layout.List
+	sshHostStripList                    layout.List
+	sshHostHomeList                     layout.List
+	sshTunnelList                       layout.List
+	sshTunnelFormList                   layout.List
+	language                            i18n.Language
+	preferencesPath                     string
+	languageButton                      widget.Clickable
+	reveals                             map[*widget.Editor]*editorReveal
 
 	logout widget.Clickable
 
-	remoteURL      widget.Editor
-	remoteUsername widget.Editor
-	remotePassword widget.Editor
-	remoteLogin    widget.Clickable
-	remoteRestore  widget.Clickable
+	remoteURL                widget.Editor
+	remoteUsername           widget.Editor
+	remotePassword           widget.Editor
+	remoteRememberPassword   widget.Bool
+	remoteAutoLoginPending   bool
+	remoteAutoLoginStarted   bool
+	remoteAutoLoginInFlight  bool
+	remoteLogin              widget.Clickable
+	remoteRestore            widget.Clickable
+	workspaceNavButtons      []widget.Clickable
+	workspaceSearch          widget.Editor
+	workspaceSearchClear     widget.Clickable
+	workspaceRefresh         widget.Clickable
+	localTerminal            widget.Clickable
+	terminalAppearanceButton widget.Clickable
+	workspaceModule          sshWorkspaceModule
 
 	sshNew         widget.Clickable
 	sshSave        widget.Clickable
@@ -93,25 +120,183 @@ type Window struct {
 	sshKeyPass     widget.Editor
 	sshFingerprint widget.Editor
 
-	sshHosts            []remote.SSHHost
-	sshHostButtons      []widget.Clickable
-	sshHostEditButtons  []widget.Clickable
-	sshHostIndex        int
-	sshHostID           string
-	sshTabs             sshTabStore
-	sshFormOpen         bool
-	sshFormOriginal     sshFormValues
-	sshFormCloseButton  widget.Clickable
-	sshFormCancelButton widget.Clickable
-	sshFormScrim        widget.Clickable
-	terminalInput       widget.Editor
-	terminalText        string
-	terminal            ptyTerminal
-	ssh                 *sshclient.Client
-	terminalCtx         context.Context
-	terminalCancel      context.CancelFunc
-	terminalMu          sync.RWMutex
-	terminalSize        image.Point
+	sshHosts                       []remote.SSHHost
+	sshHostIndices                 []int
+	sshHostQuery                   string
+	sshHostButtons                 []widget.Clickable
+	sshHostEditButtons             []widget.Clickable
+	sshRecentHostIndices           []int
+	sshRecentButtons               []widget.Clickable
+	sshTunnelNew                   widget.Clickable
+	sshTunnelActionButtons         []widget.Clickable
+	sshTunnelActionIDs             []string
+	sshTunnelEditButtons           []widget.Clickable
+	sshTunnelDeleteButtons         []widget.Clickable
+	sshHostIndex                   int
+	sshHostID                      string
+	sshTabs                        sshTabStore
+	sshTunnels                     *sshTunnelStore
+	sshPool                        *sshConnectionPool
+	sshTransportFactory            sshTransportFactory
+	transfers                      *transferManager
+	sftpFiles                      sftpFileDialog
+	sftpFileDialogBusy             bool
+	workspaceFiles                 workspaceFileDialog
+	workspaceFileDialogBusy        bool
+	workspaceImportPath            string
+	workspaceExportPath            string
+	workspaceExport                sshWorkspaceExportState
+	workspaceImport                *sshWorkspaceImportState
+	workspaceImportPassword        string
+	workspaceExportButton          widget.Clickable
+	workspaceImportButton          widget.Clickable
+	workspaceExportOpen            bool
+	workspaceExportIncludeSecrets  widget.Bool
+	workspaceExportPassword        widget.Editor
+	workspaceExportClose           widget.Clickable
+	workspaceExportCancel          widget.Clickable
+	workspaceExportSubmit          widget.Clickable
+	workspaceExportScrim           widget.Clickable
+	workspaceImportOpen            bool
+	workspaceImportPasswordEditor  widget.Editor
+	workspaceImportList            layout.List
+	workspaceImportClose           widget.Clickable
+	workspaceImportCancel          widget.Clickable
+	workspaceImportPreview         widget.Clickable
+	workspaceImportApply           widget.Clickable
+	workspaceImportScrim           widget.Clickable
+	workspaceImportConflictKeys    []string
+	workspaceImportConflictButtons [][3]widget.Clickable
+	sftpUploadConflictOpen         bool
+	sftpUploadConflicts            []sftpUploadConflict
+	sftpUploadOverwrite            widget.Clickable
+	sftpUploadSkip                 widget.Clickable
+	sftpUploadKeepBoth             widget.Clickable
+	sftpUploadConflictScrim        widget.Clickable
+	transferPanelOpen              bool
+	transferToggle                 widget.Clickable
+	transferList                   layout.List
+	transferActionButtons          []widget.Clickable
+	transferActionIDs              []string
+	sshFormOpen                    bool
+	sshFormOriginal                sshFormValues
+	sshFormCloseButton             widget.Clickable
+	sshFormCancelButton            widget.Clickable
+	sshFormScrim                   widget.Clickable
+	sshTabActionList               layout.List
+	sshTabActionButtons            []widget.Clickable
+	sshTabDrag                     sshTabDragState
+	sshTabRenameOpen               bool
+	sshTabRenameID                 string
+	sshTabRenameEditor             widget.Editor
+	sshTabRenameClose              widget.Clickable
+	sshTabRenameCancel             widget.Clickable
+	sshTabRenameSave               widget.Clickable
+	sshTabRenameScrim              widget.Clickable
+	sftpOperationOpen              bool
+	sftpOperationAction            string
+	sftpOperationTabID             string
+	sftpOperationFirst             widget.Editor
+	sftpOperationSecond            widget.Editor
+	sftpOperationClose             widget.Clickable
+	sftpOperationCancel            widget.Clickable
+	sftpOperationSave              widget.Clickable
+	sftpOperationScrim             widget.Clickable
+	sshTunnelFormOpen              bool
+	sshTunnelFormID                string
+	sshTunnelForm                  sshTunnelFormValues
+	sshTunnelName                  widget.Editor
+	sshTunnelHost                  widget.Editor
+	sshTunnelTypeButtons           [3]widget.Clickable
+	sshTunnelListenHost            widget.Editor
+	sshTunnelListenPort            widget.Editor
+	sshTunnelTargetHost            widget.Editor
+	sshTunnelTargetPort            widget.Editor
+	sshTunnelEnabled               widget.Bool
+	sshTunnelAutoStart             widget.Bool
+	sshTunnelFormClose             widget.Clickable
+	sshTunnelFormCancel            widget.Clickable
+	sshTunnelFormSave              widget.Clickable
+	sshTunnelFormDelete            widget.Clickable
+	sshTunnelFormScrim             widget.Clickable
+	sshSnippets                    *sshCommandSnippetStore
+	sshSnippetList                 layout.List
+	sshSnippetVisibleIDs           []string
+	sshSnippetExecuteBtns          []widget.Clickable
+	sshSnippetNew                  widget.Clickable
+	sshSnippetEditBtns             []widget.Clickable
+	sshSnippetDeleteBtns           []widget.Clickable
+	sshSnippetExecutionOpen        bool
+	sshSnippetExecutionID          string
+	sshSnippetVariableNames        []string
+	sshSnippetVariableEditors      []widget.Editor
+	sshSnippetExecutionList        layout.List
+	sshSnippetExecutionClose       widget.Clickable
+	sshSnippetExecutionCancel      widget.Clickable
+	sshSnippetExecutionRun         widget.Clickable
+	sshSnippetExecutionScrim       widget.Clickable
+	sshSnippetFormOpen             bool
+	sshSnippetFormID               string
+	sshSnippetForm                 sshCommandSnippetFormValues
+	sshSnippetFormList             layout.List
+	sshSnippetName                 widget.Editor
+	sshSnippetCommand              widget.Editor
+	sshSnippetVariables            widget.Editor
+	sshSnippetSecrets              widget.Editor
+	sshSnippetSavedSecretNames     string
+	sshSnippetClearSecrets         widget.Bool
+	sshSnippetEnabled              widget.Bool
+	sshSnippetFormClose            widget.Clickable
+	sshSnippetFormCancel           widget.Clickable
+	sshSnippetFormSave             widget.Clickable
+	sshSnippetFormDelete           widget.Clickable
+	sshSnippetFormScrim            widget.Clickable
+	sshKeys                        *sshKeyIdentityStore
+	sshKeyList                     layout.List
+	sshKeyNew                      widget.Clickable
+	sshKeyVisibleIDs               []string
+	sshKeyEditBtns                 []widget.Clickable
+	sshKeyDeleteBtns               []widget.Clickable
+	sshKeyFormOpen                 bool
+	sshKeyFormID                   string
+	sshKeyForm                     sshKeyIdentityFormValues
+	sshKeyFormList                 layout.List
+	sshKeyName                     widget.Editor
+	sshKeyPublicKey                widget.Editor
+	sshKeyFingerprint              widget.Editor
+	sshKeyPrivateKey               widget.Editor
+	sshKeyPassphrase               widget.Editor
+	sshKeyClearSecrets             widget.Bool
+	sshKeyEnabled                  widget.Bool
+	sshKeyFormClose                widget.Clickable
+	sshKeyFormCancel               widget.Clickable
+	sshKeyFormSave                 widget.Clickable
+	sshKeyFormDelete               widget.Clickable
+	sshKeyFormScrim                widget.Clickable
+	sshFingerprints                *sshHostFingerprintStore
+	sshFingerprintList             layout.List
+	sshFingerprintVisibleIDs       []string
+	sshFingerprintManualBtns       []widget.Clickable
+	sshFingerprintClearBtns        []widget.Clickable
+	sshFingerprintCopyBtns         []widget.Clickable
+	sshFingerprintCopyValues       []string
+	sshFingerprintManualOpen       bool
+	sshFingerprintManualHostID     string
+	sshFingerprintManualEditor     widget.Editor
+	sshFingerprintManualClose      widget.Clickable
+	sshFingerprintManualCancel     widget.Clickable
+	sshFingerprintManualSave       widget.Clickable
+	sshFingerprintManualScrim      widget.Clickable
+	sshHistory                     *sshSessionHistoryStore
+	sshHistoryList                 layout.List
+	terminalInput                  widget.Editor
+	terminalText                   string
+	terminal                       ptyTerminal
+	ssh                            *sshclient.Client
+	terminalCtx                    context.Context
+	terminalCancel                 context.CancelFunc
+	terminalMu                     sync.RWMutex
+	terminalSize                   image.Point
 
 	confirm          confirmation
 	confirmAcceptBtn widget.Clickable
@@ -156,17 +341,38 @@ func NewWindowWithPreferences(remoteService *remote.Service, preferencesPath str
 		}
 	}
 	ui := &Window{
-		model:           NewModel(remoteService),
-		theme:           th,
-		events:          make(chan asyncEvent, 8),
-		closed:          make(chan struct{}),
-		language:        language,
-		preferencesPath: preferencesPath,
+		model:               NewModel(remoteService),
+		theme:               th,
+		terminalAppearance:  normalizeTerminalAppearance(terminalAppearance{Font: terminalFontBuiltin, FontSize: 13}),
+		events:              make(chan asyncEvent, 8),
+		closed:              make(chan struct{}),
+		language:            language,
+		preferencesPath:     preferencesPath,
+		workspaceModule:     sshWorkspaceHosts,
+		sshTunnels:          newSSHTunnelStore(),
+		sshSnippets:         newSSHCommandSnippetStore(),
+		sshKeys:             newSSHKeyIdentityStore(),
+		sshFingerprints:     newSSHHostFingerprintStore(),
+		sshHistory:          newSSHSessionHistoryStore(),
+		sshPool:             newSSHConnectionPool(),
+		sshTransportFactory: newSSHClientTransport,
+		transferPanelOpen:   true,
+	}
+	ui.transfers = newTransferManager(3, ui.executeSFTPTransfer)
+	ui.transfers.onChange = func() {
+		if ui.window != nil {
+			ui.window.Invalidate()
+		}
 	}
 	if remoteService != nil {
 		if prefs, err := remoteService.Preferences(); err == nil {
 			ui.remoteURL.SetText(prefs.BaseURL)
 			ui.remoteUsername.SetText(prefs.Username)
+			if password, err := remoteService.RememberedPassword(); err == nil {
+				ui.remotePassword.SetText(password)
+				ui.remoteRememberPassword.Value = true
+				ui.remoteAutoLoginPending = true
+			}
 		}
 	}
 	return ui
@@ -192,9 +398,22 @@ func (ui *Window) toggleLanguage() error {
 // Run attaches the controller to a Gio window and processes its event loop.
 func (ui *Window) Run(window *app.Window) error {
 	ui.window = window
+	if ui.sftpFiles == nil {
+		ui.sftpFiles = newNativeSFTPFileDialog(window)
+	}
+	if ui.workspaceFiles == nil {
+		if dialog, ok := ui.sftpFiles.(workspaceFileDialog); ok {
+			ui.workspaceFiles = dialog
+		}
+	}
+	ui.startRemoteAutoLogin()
 	window.Option(app.Title("s12ryt SSH"), app.Size(unit.Dp(1180), unit.Dp(760)), app.MinSize(unit.Dp(680), unit.Dp(560)))
 	for {
-		switch e := window.Event().(type) {
+		current := window.Event()
+		if listener, ok := ui.sftpFiles.(sftpFileDialogEventListener); ok {
+			listener.ListenEvents(current)
+		}
+		switch e := current.(type) {
 		case app.DestroyEvent:
 			return ui.Close()
 		case app.FrameEvent:
@@ -230,6 +449,23 @@ func (ui *Window) Close() error {
 			}
 		}
 	})
+	ui.closeSSHTabRename()
+	ui.closeSFTPOperation()
+	ui.closeSFTPUploadConflicts()
+	ui.closeSSHTunnelForm()
+	ui.closeSSHCommandSnippetExecution()
+	ui.closeSSHCommandSnippetForm()
+	ui.closeSSHKeyIdentityForm()
+	ui.closeManualSSHHostFingerprint()
+	ui.closeSSHWorkspaceImportExport()
+	ui.closeTerminalAppearanceForm()
+	if ui.sshTunnels != nil {
+		ui.stopAllSSHTunnels()
+		ui.sshTunnels.closeAll()
+	}
+	if ui.transfers != nil {
+		ui.transfers.close()
+	}
 	ui.closeSSH()
 	if ui.model.RemoteSession != nil {
 		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
@@ -278,8 +514,10 @@ func (ui *Window) discardSSHTabApply(id uint64) {
 }
 
 func (ui *Window) closeSSH() {
-	for len(ui.sshTabs.tabs) > 0 {
-		ui.sshTabs.close(ui.sshTabs.tabs[0].ID)
+	ui.finishAllSSHTabHistory()
+	ui.sshTabs.closeAll()
+	if ui.sshPool != nil {
+		ui.sshPool.closeAll()
 	}
 	if ui.terminalCancel != nil {
 		ui.terminalCancel()
@@ -365,9 +603,73 @@ func (ui *Window) handle(gtx layout.Context) {
 		}
 		return
 	}
+	if ui.sftpUploadConflictOpen {
+		if ui.model.Screen == ScreenRemoteWorkspace && ui.model.SSHEnabled {
+			ui.handleSFTPUploadConflict(gtx)
+		}
+		return
+	}
+	if ui.terminalAppearanceOpen {
+		if ui.model.Screen == ScreenRemoteWorkspace && ui.model.SSHEnabled {
+			ui.handleTerminalAppearanceForm(gtx)
+		}
+		return
+	}
+	if ui.workspaceExportOpen || ui.workspaceImportOpen {
+		if ui.model.Screen == ScreenRemoteWorkspace && ui.model.SSHEnabled {
+			if ui.workspaceExportOpen {
+				ui.handleSSHWorkspaceExportForm(gtx)
+			} else {
+				ui.handleSSHWorkspaceImportForm(gtx)
+			}
+		}
+		return
+	}
 	if ui.sshFormOpen {
 		if ui.model.Screen == ScreenRemoteWorkspace && ui.model.SSHEnabled {
 			ui.handleSSHHostForm(gtx)
+		}
+		return
+	}
+	if ui.sshTabRenameOpen {
+		if ui.model.Screen == ScreenRemoteWorkspace && ui.model.SSHEnabled {
+			ui.handleSSHTabRename(gtx)
+		}
+		return
+	}
+	if ui.sftpOperationOpen {
+		if ui.model.Screen == ScreenRemoteWorkspace && ui.model.SSHEnabled {
+			ui.handleSFTPOperation(gtx)
+		}
+		return
+	}
+	if ui.sshTunnelFormOpen {
+		if ui.model.Screen == ScreenRemoteWorkspace && ui.model.SSHEnabled {
+			ui.handleSSHTunnelForm(gtx)
+		}
+		return
+	}
+	if ui.sshSnippetExecutionOpen {
+		if ui.model.Screen == ScreenRemoteWorkspace && ui.model.SSHEnabled {
+			ui.handleSSHCommandSnippetExecution(gtx)
+		}
+		return
+	}
+	if ui.sshSnippetFormOpen {
+		if ui.model.Screen == ScreenRemoteWorkspace && ui.model.SSHEnabled {
+			ui.handleSSHCommandSnippetForm(gtx)
+		}
+		return
+	}
+	if ui.sshKeyFormOpen {
+		if ui.model.Screen == ScreenRemoteWorkspace && ui.model.SSHEnabled {
+			ui.handleSSHKeyIdentityForm(gtx)
+		}
+		return
+	}
+	if ui.sshFingerprintManualOpen {
+		if ui.model.Screen == ScreenRemoteWorkspace && ui.model.SSHEnabled {
+			ui.handleManualSSHHostFingerprint(gtx)
 		}
 		return
 	}
@@ -422,9 +724,97 @@ func (ui *Window) layout(gtx layout.Context) {
 	if ui.sshFormOpen && ui.model.Screen == ScreenRemoteWorkspace && ui.model.SSHEnabled {
 		ui.sshHostFormModal(gtx)
 	}
+	if ui.terminalAppearanceOpen && ui.model.Screen == ScreenRemoteWorkspace && ui.model.SSHEnabled {
+		ui.terminalAppearanceModal(gtx)
+	}
+	if ui.sshTabRenameOpen && ui.model.Screen == ScreenRemoteWorkspace && ui.model.SSHEnabled {
+		ui.sshTabRenameModal(gtx)
+	}
+	if ui.sftpOperationOpen && ui.model.Screen == ScreenRemoteWorkspace && ui.model.SSHEnabled {
+		ui.sftpOperationModal(gtx)
+	}
+	if ui.sftpUploadConflictOpen && ui.model.Screen == ScreenRemoteWorkspace && ui.model.SSHEnabled {
+		ui.sftpUploadConflictModal(gtx)
+	}
+	if (ui.workspaceExportOpen || ui.workspaceImportOpen) && ui.model.Screen == ScreenRemoteWorkspace && ui.model.SSHEnabled {
+		ui.workspaceImportExportModal(gtx)
+	}
+	if ui.sshTunnelFormOpen && ui.model.Screen == ScreenRemoteWorkspace && ui.model.SSHEnabled {
+		ui.sshTunnelFormModal(gtx)
+	}
+	if ui.sshSnippetExecutionOpen && ui.model.Screen == ScreenRemoteWorkspace && ui.model.SSHEnabled {
+		ui.sshCommandSnippetExecutionModal(gtx)
+	}
+	if ui.sshSnippetFormOpen && ui.model.Screen == ScreenRemoteWorkspace && ui.model.SSHEnabled {
+		ui.sshCommandSnippetFormModal(gtx)
+	}
+	if ui.sshKeyFormOpen && ui.model.Screen == ScreenRemoteWorkspace && ui.model.SSHEnabled {
+		ui.sshKeyIdentityFormModal(gtx)
+	}
+	if ui.sshFingerprintManualOpen && ui.model.Screen == ScreenRemoteWorkspace && ui.model.SSHEnabled {
+		ui.manualSSHHostFingerprintModal(gtx)
+	}
 	if ui.confirm.active {
 		ui.confirmModal(gtx)
 	}
+}
+
+func (ui *Window) sftpUploadConflictModal(gtx layout.Context) {
+	scrim := color.NRGBA{R: 0, G: 0, B: 0, A: 150}
+	layout.Stack{Alignment: layout.Center}.Layout(gtx,
+		layout.Expanded(func(gtx layout.Context) layout.Dimensions {
+			return ui.sftpUploadConflictScrim.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+				paint.FillShape(gtx.Ops, scrim, clip.Rect{Max: gtx.Constraints.Max}.Op())
+				return layout.Dimensions{Size: gtx.Constraints.Max}
+			})
+		}),
+		layout.Stacked(func(gtx layout.Context) layout.Dimensions {
+			return ui.sftpUploadConflictDialog(gtx)
+		}),
+	)
+}
+
+func (ui *Window) sftpUploadConflictDialog(gtx layout.Context) layout.Dimensions {
+	if len(ui.sftpUploadConflicts) == 0 {
+		return layout.Dimensions{}
+	}
+	conflict := ui.sftpUploadConflicts[0]
+	gtx.Constraints.Max.X = min(gtx.Constraints.Max.X, gtx.Dp(520))
+	return ui.surface(gtx, func(gtx layout.Context) layout.Dimensions {
+		return layout.Inset{Top: unit.Dp(cardPadding), Bottom: unit.Dp(cardPadding), Left: unit.Dp(cardPadding), Right: unit.Dp(cardPadding)}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+			return layout.Flex{Axis: layout.Vertical, Gap: gtx.Dp(sectionGap)}.Layout(gtx,
+				layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+					title := material.H6(ui.theme, ui.text("Resolve upload conflict"))
+					title.Color = colorText
+					return title.Layout(gtx)
+				}),
+				layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+					warning := material.Body1(ui.theme, ui.text("A remote file with this name already exists."))
+					warning.Color = colorMuted
+					return warning.Layout(gtx)
+				}),
+				layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+					file := material.Body1(ui.theme, conflict.Candidate.RemotePath)
+					file.Color = colorTeal
+					return file.Layout(gtx)
+				}),
+				layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+					return layout.Flex{Axis: layout.Horizontal, Gap: gtx.Dp(rowGap)}.Layout(gtx,
+						layout.Flexed(1, func(gtx layout.Context) layout.Dimensions { return layout.Dimensions{} }),
+						layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+							return ui.button(gtx, &ui.sftpUploadSkip, "Skip", false)
+						}),
+						layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+							return ui.button(gtx, &ui.sftpUploadKeepBoth, "Keep both", false)
+						}),
+						layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+							return ui.button(gtx, &ui.sftpUploadOverwrite, "Overwrite", true)
+						}),
+					)
+				}),
+			)
+		})
+	})
 }
 
 func (ui *Window) sshHostFormModal(gtx layout.Context) layout.Dimensions {
@@ -487,6 +877,230 @@ func (ui *Window) sshHostFormDialog(gtx layout.Context) layout.Dimensions {
 			)
 		})
 	})
+}
+
+func (ui *Window) sshTabRenameModal(gtx layout.Context) {
+	scrim := color.NRGBA{R: 0, G: 0, B: 0, A: 150}
+	layout.Stack{Alignment: layout.Center}.Layout(gtx,
+		layout.Expanded(func(gtx layout.Context) layout.Dimensions {
+			return ui.sshTabRenameScrim.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+				paint.FillShape(gtx.Ops, scrim, clip.Rect{Max: gtx.Constraints.Max}.Op())
+				return layout.Dimensions{Size: gtx.Constraints.Max}
+			})
+		}),
+		layout.Stacked(func(gtx layout.Context) layout.Dimensions {
+			return ui.sshTabRenameDialog(gtx)
+		}),
+	)
+}
+
+func (ui *Window) sshTabRenameDialog(gtx layout.Context) layout.Dimensions {
+	gtx.Constraints.Max.X = min(gtx.Constraints.Max.X, gtx.Dp(440))
+	gtx.Constraints.Max.Y = min(gtx.Constraints.Max.Y, gtx.Dp(240))
+	return ui.surface(gtx, func(gtx layout.Context) layout.Dimensions {
+		return layout.Inset{Top: unit.Dp(cardPadding), Bottom: unit.Dp(cardPadding), Left: unit.Dp(cardPadding), Right: unit.Dp(cardPadding)}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+			return layout.Flex{Axis: layout.Vertical, Gap: gtx.Dp(rowGap)}.Layout(gtx,
+				layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+					return layout.Flex{Axis: layout.Horizontal, Alignment: layout.Middle}.Layout(gtx,
+						layout.Flexed(1, func(gtx layout.Context) layout.Dimensions {
+							title := material.H6(ui.theme, ui.text("Rename terminal tab"))
+							title.Color = colorText
+							return title.Layout(gtx)
+						}),
+						layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+							return ui.button(gtx, &ui.sshTabRenameClose, "Close", false)
+						}),
+					)
+				}),
+				layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+					ui.sshTabRenameEditor.SingleLine = true
+					ui.sshTabRenameEditor.Submit = true
+					return ui.labeledField(gtx, &ui.sshTabRenameEditor, "Tab name", true, false)
+				}),
+				layout.Rigid(func(gtx layout.Context) layout.Dimensions { return ui.status(gtx) }),
+				layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+					return layout.Flex{Axis: layout.Horizontal, Alignment: layout.Middle, Gap: gtx.Dp(rowGap)}.Layout(gtx,
+						layout.Flexed(1, func(gtx layout.Context) layout.Dimensions { return layout.Dimensions{} }),
+						layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+							return ui.button(gtx, &ui.sshTabRenameCancel, "Cancel", false)
+						}),
+						layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+							return ui.button(gtx, &ui.sshTabRenameSave, "Save name", true)
+						}),
+					)
+				}),
+			)
+		})
+	})
+}
+
+func (ui *Window) sftpOperationModal(gtx layout.Context) {
+	scrim := color.NRGBA{R: 0, G: 0, B: 0, A: 150}
+	layout.Stack{Alignment: layout.Center}.Layout(gtx,
+		layout.Expanded(func(gtx layout.Context) layout.Dimensions {
+			return ui.sftpOperationScrim.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+				paint.FillShape(gtx.Ops, scrim, clip.Rect{Max: gtx.Constraints.Max}.Op())
+				return layout.Dimensions{Size: gtx.Constraints.Max}
+			})
+		}),
+		layout.Stacked(func(gtx layout.Context) layout.Dimensions {
+			return ui.sftpOperationDialog(gtx)
+		}),
+	)
+}
+
+func (ui *Window) sftpOperationDialog(gtx layout.Context) layout.Dimensions {
+	spec, ok := sftpOperationDialogSpec(ui.sftpOperationAction)
+	if !ok {
+		return layout.Dimensions{}
+	}
+	gtx.Constraints.Max.X = min(gtx.Constraints.Max.X, gtx.Dp(480))
+	gtx.Constraints.Max.Y = min(gtx.Constraints.Max.Y, gtx.Dp(360))
+	return ui.surface(gtx, func(gtx layout.Context) layout.Dimensions {
+		return layout.Inset{Top: unit.Dp(cardPadding), Bottom: unit.Dp(cardPadding), Left: unit.Dp(cardPadding), Right: unit.Dp(cardPadding)}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+			return layout.Flex{Axis: layout.Vertical, Gap: gtx.Dp(rowGap)}.Layout(gtx,
+				layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+					return layout.Flex{Axis: layout.Horizontal, Alignment: layout.Middle}.Layout(gtx,
+						layout.Flexed(1, func(gtx layout.Context) layout.Dimensions {
+							title := material.H6(ui.theme, ui.text(ui.sftpOperationAction))
+							title.Color = colorText
+							return title.Layout(gtx)
+						}),
+						layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+							return ui.button(gtx, &ui.sftpOperationClose, "Close", false)
+						}),
+					)
+				}),
+				layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+					return ui.labeledField(gtx, &ui.sftpOperationFirst, spec.fieldSources[0], true, false)
+				}),
+				layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+					if len(spec.fieldSources) < 2 {
+						return layout.Dimensions{}
+					}
+					return ui.labeledField(gtx, &ui.sftpOperationSecond, spec.fieldSources[1], true, false)
+				}),
+				layout.Rigid(func(gtx layout.Context) layout.Dimensions { return ui.status(gtx) }),
+				layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+					return layout.Flex{Axis: layout.Horizontal, Alignment: layout.Middle, Gap: gtx.Dp(rowGap)}.Layout(gtx,
+						layout.Flexed(1, func(gtx layout.Context) layout.Dimensions { return layout.Dimensions{} }),
+						layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+							return ui.button(gtx, &ui.sftpOperationCancel, "Cancel", false)
+						}),
+						layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+							return ui.button(gtx, &ui.sftpOperationSave, spec.submitSource, true)
+						}),
+					)
+				}),
+			)
+		})
+	})
+}
+
+func (ui *Window) sshTunnelFormModal(gtx layout.Context) {
+	scrim := color.NRGBA{R: 0, G: 0, B: 0, A: 150}
+	layout.Stack{Alignment: layout.Center}.Layout(gtx,
+		layout.Expanded(func(gtx layout.Context) layout.Dimensions {
+			return ui.sshTunnelFormScrim.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+				paint.FillShape(gtx.Ops, scrim, clip.Rect{Max: gtx.Constraints.Max}.Op())
+				return layout.Dimensions{Size: gtx.Constraints.Max}
+			})
+		}),
+		layout.Stacked(func(gtx layout.Context) layout.Dimensions {
+			return ui.sshTunnelFormDialog(gtx)
+		}),
+	)
+}
+
+func (ui *Window) sshTunnelFormDialog(gtx layout.Context) layout.Dimensions {
+	gtx.Constraints.Max.X = min(gtx.Constraints.Max.X, gtx.Dp(640))
+	gtx.Constraints.Max.Y = min(gtx.Constraints.Max.Y, gtx.Dp(620))
+	return ui.surface(gtx, func(gtx layout.Context) layout.Dimensions {
+		return layout.Inset{Top: unit.Dp(cardPadding), Bottom: unit.Dp(cardPadding), Left: unit.Dp(cardPadding), Right: unit.Dp(cardPadding)}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+			titleSource := "New tunnel"
+			if ui.sshTunnelFormID != "" {
+				titleSource = "Edit tunnel"
+			}
+			return layout.Flex{Axis: layout.Vertical, Gap: gtx.Dp(rowGap)}.Layout(gtx,
+				layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+					return layout.Flex{Axis: layout.Horizontal, Alignment: layout.Middle}.Layout(gtx,
+						layout.Flexed(1, func(gtx layout.Context) layout.Dimensions {
+							title := material.H6(ui.theme, ui.text(titleSource))
+							title.Color = colorText
+							return title.Layout(gtx)
+						}),
+						layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+							return ui.button(gtx, &ui.sshTunnelFormClose, "Close", false)
+						}),
+					)
+				}),
+				layout.Rigid(func(gtx layout.Context) layout.Dimensions { return ui.status(gtx) }),
+				layout.Flexed(1, func(gtx layout.Context) layout.Dimensions {
+					ui.sshTunnelFormList.Axis = layout.Vertical
+					return ui.sshTunnelFormList.Layout(gtx, 6, func(gtx layout.Context, index int) layout.Dimensions {
+						switch index {
+						case 0:
+							return ui.labeledField(gtx, &ui.sshTunnelName, "Tunnel name", true, false)
+						case 1:
+							return ui.labeledField(gtx, &ui.sshTunnelHost, "Tunnel host", true, false)
+						case 2:
+							return ui.sshTunnelTypeField(gtx)
+						case 3:
+							return ui.editorRow(gtx, "Listen host", &ui.sshTunnelListenHost, "Listen port", &ui.sshTunnelListenPort)
+						case 4:
+							return ui.editorRow(gtx, "Target host", &ui.sshTunnelTargetHost, "Target port", &ui.sshTunnelTargetPort)
+						case 5:
+							return layout.Flex{Axis: layout.Horizontal, Gap: gtx.Dp(cardGap)}.Layout(gtx,
+								layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+									return material.CheckBox(ui.theme, &ui.sshTunnelEnabled, ui.text("Enabled")).Layout(gtx)
+								}),
+								layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+									return material.CheckBox(ui.theme, &ui.sshTunnelAutoStart, ui.text("Auto-start")).Layout(gtx)
+								}),
+							)
+						}
+						return layout.Dimensions{}
+					})
+				}),
+				layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+					return layout.Flex{Axis: layout.Horizontal, Alignment: layout.Middle, Gap: gtx.Dp(rowGap)}.Layout(gtx,
+						layout.Flexed(1, func(gtx layout.Context) layout.Dimensions { return layout.Dimensions{} }),
+						layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+							return ui.button(gtx, &ui.sshTunnelFormCancel, "Cancel", false)
+						}),
+						layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+							return ui.button(gtx, &ui.sshTunnelFormSave, "Save tunnel", true)
+						}),
+						layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+							if ui.sshTunnelFormID == "" {
+								return layout.Dimensions{}
+							}
+							return ui.actionButton(gtx, &ui.sshTunnelFormDelete, "Delete tunnel", false, true)
+						}),
+					)
+				}),
+			)
+		})
+	})
+}
+
+func (ui *Window) sshTunnelTypeField(gtx layout.Context) layout.Dimensions {
+	return layout.Flex{Axis: layout.Vertical, Gap: gtx.Dp(fieldGap)}.Layout(gtx,
+		layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+			return ui.fieldLabel(gtx, "Tunnel type")
+		}),
+		layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+			options := sshTunnelTypeOptions()
+			children := make([]layout.FlexChild, 0, len(options))
+			for index, tunnelType := range options {
+				index, tunnelType := index, tunnelType
+				children = append(children, layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+					return ui.button(gtx, &ui.sshTunnelTypeButtons[index], sshTunnelDirectionSource(tunnelType), ui.sshTunnelForm.Type == tunnelType)
+				}))
+			}
+			return layout.Flex{Axis: layout.Horizontal, Gap: gtx.Dp(rowGap)}.Layout(gtx, children...)
+		}),
+	)
 }
 
 // confirmModal overlays a dimmed scrim with the destructive-action dialog.

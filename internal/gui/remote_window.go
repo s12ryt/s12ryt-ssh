@@ -11,11 +11,16 @@ import (
 )
 
 func (ui *Window) handleRemoteLogin(gtx layout.Context) {
+	ui.remoteRememberPassword.Update(gtx)
 	if ui.drainEditors(gtx, &ui.remoteURL, &ui.remoteUsername, &ui.remotePassword) {
+		ui.remoteAutoLoginPending = false
+		ui.remoteAutoLoginInFlight = false
 		ui.tryRemoteSignIn()
 		return
 	}
 	if ui.remoteLogin.Clicked(gtx) {
+		ui.remoteAutoLoginPending = false
+		ui.remoteAutoLoginInFlight = false
 		ui.tryRemoteSignIn()
 	}
 	if ui.remoteRestore.Clicked(gtx) {
@@ -42,6 +47,10 @@ func (ui *Window) handleRemoteLogin(gtx layout.Context) {
 func (ui *Window) activateRemoteSession(session RemoteSession, sshEnabled bool) {
 	ui.model.SetRemoteSession(session, sshEnabled)
 	if sshEnabled {
+		if _, ok := session.(remoteWorkspacePreferencesSession); ok {
+			ui.refreshTerminalAppearance()
+			return
+		}
 		if len(ui.sshHosts) == 0 {
 			ui.refreshSSHHosts()
 		}
@@ -52,8 +61,22 @@ func (ui *Window) activateRemoteSession(session RemoteSession, sshEnabled bool) 
 
 func (ui *Window) handleRemoteWorkspace(gtx layout.Context) {
 	if ui.logout.Clicked(gtx) {
+		ui.stopAllSSHTunnels()
 		ui.closeSSH()
 		ui.closeSSHHostForm()
+		ui.closeSSHTabRename()
+		ui.closeSFTPOperation()
+		ui.closeSFTPUploadConflicts()
+		ui.closeSSHTunnelForm()
+		ui.closeSSHCommandSnippetExecution()
+		ui.closeSSHCommandSnippetForm()
+		ui.closeSSHKeyIdentityForm()
+		ui.closeManualSSHHostFingerprint()
+		ui.closeSSHWorkspaceImportExport()
+		ui.closeTerminalAppearanceForm()
+		if ui.sshTunnels != nil {
+			ui.sshTunnels.closeAll()
+		}
 		session := ui.model.RemoteSession
 		ui.asyncAlways("Signing out...", func(ctx context.Context) (func(), error) {
 			var err error
@@ -65,12 +88,15 @@ func (ui *Window) handleRemoteWorkspace(gtx layout.Context) {
 				ui.sshHosts = nil
 				ui.sshHostButtons = nil
 				ui.sshHostEditButtons = nil
+				ui.clearSSHKeyIdentityView()
+				ui.clearSSHHostFingerprintView()
+				ui.clearSSHSessionHistoryView()
 			}, err
 		})
 		return
 	}
 	if ui.model.SSHEnabled {
-		ui.handleRemoteSSH(gtx)
+		ui.handleSSHWorkspace(gtx)
 	}
 }
 
@@ -84,7 +110,7 @@ func (ui *Window) remoteLoginView(gtx layout.Context) layout.Dimensions {
 						return material.H5(ui.theme, ui.text("Sign in with authentication service")).Layout(gtx)
 					}),
 					layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-						label := material.Body2(ui.theme, ui.text("Use a complete HTTP or HTTPS URL. The password is never saved."))
+						label := material.Body2(ui.theme, ui.text("The password is saved only when Remember password is enabled."))
 						label.Color = colorMuted
 						return label.Layout(gtx)
 					}),
@@ -97,6 +123,14 @@ func (ui *Window) remoteLoginView(gtx layout.Context) layout.Dimensions {
 					}),
 					layout.Rigid(func(gtx layout.Context) layout.Dimensions {
 						return ui.labeledField(gtx, &ui.remotePassword, "Password", true, true)
+					}),
+					layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+						return material.CheckBox(ui.theme, &ui.remoteRememberPassword, ui.text("Remember password")).Layout(gtx)
+					}),
+					layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+						label := material.Caption(ui.theme, ui.text("The password is protected by Windows and kept after sign-out."))
+						label.Color = colorMuted
+						return label.Layout(gtx)
 					}),
 					layout.Rigid(func(gtx layout.Context) layout.Dimensions {
 						return ui.actionButtonBlock(gtx, &ui.remoteLogin, "Sign in remotely", true, false)
@@ -129,25 +163,7 @@ func (ui *Window) remoteWorkspaceView(gtx layout.Context) layout.Dimensions {
 			if !ui.model.SSHEnabled {
 				return ui.remoteSSHDisabledView(gtx)
 			}
-			widthDp := int(float32(gtx.Constraints.Max.X) / gtx.Metric.PxPerDp)
-			if useSSHHostStrip(widthDp) {
-				return layout.Flex{Axis: layout.Vertical, Gap: gtx.Dp(cardGap)}.Layout(gtx,
-					layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-						return ui.remoteSSHHostStrip(gtx)
-					}),
-					layout.Flexed(1, func(gtx layout.Context) layout.Dimensions {
-						return ui.remoteSSHView(gtx)
-					}),
-				)
-			}
-			return layout.Flex{Axis: layout.Horizontal, Gap: gtx.Dp(cardGap)}.Layout(gtx,
-				layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-					return ui.remoteSSHSidebar(gtx)
-				}),
-				layout.Flexed(1, func(gtx layout.Context) layout.Dimensions {
-					return ui.remoteSSHView(gtx)
-				}),
-			)
+			return ui.workspaceShell(gtx)
 		}),
 	)
 }

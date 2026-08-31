@@ -249,6 +249,8 @@ func (ui *Window) tryRemoteSignIn() bool {
 	if ui.busy {
 		return false
 	}
+	automatic := ui.remoteAutoLoginInFlight
+	ui.remoteAutoLoginInFlight = false
 	rawURL := strings.TrimSpace(ui.remoteURL.Text())
 	username := strings.TrimSpace(ui.remoteUsername.Text())
 	password := ui.remotePassword.Text()
@@ -261,14 +263,20 @@ func (ui *Window) tryRemoteSignIn() bool {
 		return false
 	}
 	service := ui.model.RemoteService
-	ui.async("Signing in to authentication service...", func(ctx context.Context) (func(), error) {
-		session, err := service.Login(ctx, rawURL, username, password)
+	ui.asyncAlways("Signing in to authentication service...", func(ctx context.Context) (func(), error) {
+		session, err := service.LoginWithOptions(ctx, rawURL, username, password, ui.remoteRememberPassword.Value)
 		if err != nil {
+			if automatic {
+				return ui.clearFailedRememberedPassword, err
+			}
 			return nil, err
 		}
 		overview, err := session.ResourcesOverview(ctx)
 		if err != nil {
 			_ = session.Logout(ctx)
+			if automatic {
+				return ui.clearFailedRememberedPassword, err
+			}
 			return nil, err
 		}
 		return func() {
@@ -277,4 +285,31 @@ func (ui *Window) tryRemoteSignIn() bool {
 		}, nil
 	})
 	return true
+}
+
+func (ui *Window) startRemoteAutoLogin() bool {
+	if ui == nil || !ui.remoteAutoLoginPending || ui.remoteAutoLoginStarted {
+		return false
+	}
+	ui.remoteAutoLoginStarted = true
+	ui.remoteAutoLoginPending = false
+	ui.remoteAutoLoginInFlight = true
+	if ui.tryRemoteSignIn() {
+		return true
+	}
+	ui.remoteAutoLoginInFlight = false
+	return false
+}
+
+func (ui *Window) clearFailedRememberedPassword() {
+	if ui == nil {
+		return
+	}
+	if ui.model != nil && ui.model.RemoteService != nil {
+		_ = ui.model.RemoteService.ForgetRememberedPassword()
+	}
+	ui.remotePassword.SetText("")
+	ui.remoteRememberPassword.Value = false
+	ui.remoteAutoLoginPending = false
+	ui.remoteAutoLoginInFlight = false
 }

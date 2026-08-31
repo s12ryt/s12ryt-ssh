@@ -5,13 +5,22 @@ import (
 	"errors"
 	"fmt"
 	"image"
+	"image/color"
+	"io"
 	"regexp"
 	"strconv"
 	"strings"
 	"time"
 
+	"gioui.org/font"
+	"gioui.org/io/clipboard"
+	"gioui.org/io/event"
 	"gioui.org/io/key"
+	"gioui.org/io/pointer"
+	"gioui.org/io/transfer"
 	"gioui.org/layout"
+	"gioui.org/op/clip"
+	"gioui.org/op/paint"
 	"gioui.org/unit"
 	"gioui.org/widget"
 	"gioui.org/widget/material"
@@ -60,9 +69,8 @@ func parsePendingFingerprint(err error) (string, bool) {
 // applySSHHosts stores the account host list and keeps the selected host
 // attached when the refreshed list still contains it.
 func (ui *Window) applySSHHosts(hosts []remote.SSHHost) {
+	ui.syncSSHHostResourceAvailability(hosts)
 	ui.sshHosts = append([]remote.SSHHost(nil), hosts...)
-	ui.sshHostButtons = make([]widget.Clickable, len(ui.sshHosts))
-	ui.sshHostEditButtons = make([]widget.Clickable, len(ui.sshHosts))
 	ui.sshHostIndex = -1
 	for i := range ui.sshHosts {
 		if ui.sshHosts[i].ID == ui.sshHostID {
@@ -70,6 +78,84 @@ func (ui *Window) applySSHHosts(hosts []remote.SSHHost) {
 			break
 		}
 	}
+	ui.rebuildSSHHostFilter()
+}
+
+func (ui *Window) syncSSHHostResourceAvailability(hosts []remote.SSHHost) {
+	if ui == nil {
+		return
+	}
+	for _, host := range hosts {
+		if host.Enabled {
+			if ui.sshPool != nil {
+				ui.sshPool.setHostEnabled(host.ID, true)
+			}
+			if ui.transfers != nil {
+				ui.transfers.setHostEnabled(host.ID, true, "")
+			}
+			continue
+		}
+		ui.disableSSHHostResources(host.ID)
+	}
+}
+
+func (ui *Window) disableSSHHostResources(hostID string) {
+	if ui == nil || strings.TrimSpace(hostID) == "" {
+		return
+	}
+	disabledTabIDs := make(map[string]bool)
+	for _, tab := range ui.sshTabs.tabs {
+		if tab == nil || tab.Local || tab.HostID != hostID {
+			continue
+		}
+		disabledTabIDs[tab.ID] = true
+		ui.finishSSHSessionHistory(tab, remote.SSHSessionClosed, "")
+	}
+	if ui.transfers != nil {
+		ui.transfers.setHostEnabled(hostID, false, ui.text("Host is disabled."))
+	}
+	if ui.sshPool != nil {
+		ui.sshPool.setHostEnabled(hostID, false)
+	}
+	ui.sshTabs.closeHost(hostID)
+	if ui.sshTunnels != nil {
+		ui.stopSSHHostTunnels(hostID)
+	}
+	if disabledTabIDs[ui.sshTabRenameID] {
+		ui.closeSSHTabRename()
+	}
+	if disabledTabIDs[ui.sftpOperationTabID] {
+		ui.closeSFTPOperation()
+	}
+	if ui.sshTabDrag.active && disabledTabIDs[ui.sshTabDrag.tabID] {
+		ui.sshTabDrag.reset()
+	}
+	if len(ui.sftpUploadConflicts) > 0 {
+		kept := ui.sftpUploadConflicts[:0]
+		for _, conflict := range ui.sftpUploadConflicts {
+			if !disabledTabIDs[conflict.TabID] {
+				kept = append(kept, conflict)
+			}
+		}
+		ui.sftpUploadConflicts = kept
+		if len(kept) == 0 {
+			ui.closeSFTPUploadConflicts()
+		}
+	}
+}
+
+func (ui *Window) sshHostEnabled(hostID string) bool {
+	if ui == nil {
+		return false
+	}
+	for _, host := range ui.sshHosts {
+		if host.ID == hostID {
+			return host.Enabled
+		}
+	}
+	// A rule can be loaded before the host list. The connection pool still
+	// rejects hosts once an explicit disabled record has been observed.
+	return true
 }
 
 func (ui *Window) selectSSHHost(index int) {
@@ -217,25 +303,62 @@ func (ui *Window) handleRemoteSSH(gtx layout.Context) {
 		return
 	}
 	if tab := ui.sshTabs.active(); tab != nil && tab.State == sshTabConnected {
-		if ui.drainEditors(gtx, &tab.input) {
-			ui.sendSSHTabInput(tab.ID)
+		if tab.terminalViewButton.Clicked(gtx) {
+			ui.sshTabs.setView(tab.ID, sshTabViewTerminal)
+			return
+		}
+		if !tab.Local && tab.sftpViewButton.Clicked(gtx) {
+			if tab.sftpBrowser == nil {
+				ui.openSSHTabSFTP(tab.ID)
+			} else {
+				ui.sshTabs.setView(tab.ID, sshTabViewSFTP)
+			}
+			return
+		}
+		if tab.View == sshTabViewSFTP {
+			if ui.handleSSHTabSFTP(gtx, tab) {
+				return
+			}
+		} else {
+			if ui.handleSSHTabClipboard(gtx, tab) {
+				return
+			}
+			if ui.handleSSHTabKeys(gtx, tab) {
+				return
+			}
+			if ui.drainEditors(gtx, &tab.input) {
+				ui.sendSSHTabInput(tab.ID)
+				return
+			}
+		}
+	}
+	ui.rebuildSSHHostFilterIfNeeded()
+	for i := range ui.sshRecentButtons {
+		if ui.sshRecentButtons[i].Clicked(gtx) {
+			ui.openSSHHostTab(ui.sshRecentHostIndices[i])
 			return
 		}
 	}
 	for i := range ui.sshHostButtons {
 		if ui.sshHostButtons[i].Clicked(gtx) {
-			ui.openSSHHostTab(i)
+			ui.openSSHHostTab(ui.sshHostIndices[i])
 			return
 		}
 	}
 	for i := range ui.sshHostEditButtons {
 		if ui.sshHostEditButtons[i].Clicked(gtx) {
-			ui.openSSHEditHostForm(i)
+			ui.openSSHEditHostForm(ui.sshHostIndices[i])
 			return
 		}
 	}
 	if ui.sshNew.Clicked(gtx) {
 		ui.openSSHNewHostForm()
+		return
+	}
+	if ui.handleSSHTabDrag(gtx) {
+		return
+	}
+	if ui.handleSSHTabActions(gtx) {
 		return
 	}
 	for _, tab := range ui.sshTabs.tabs {
@@ -258,6 +381,338 @@ func (ui *Window) handleRemoteSSH(gtx layout.Context) {
 			return
 		}
 	}
+}
+
+func (ui *Window) handleSSHTabDrag(gtx layout.Context) bool {
+	if ui.sshTabDrag.active && ui.sshTabs.get(ui.sshTabDrag.tabID) == nil {
+		ui.sshTabDrag.reset()
+	}
+	kinds := pointer.Press | pointer.Drag | pointer.Release | pointer.Cancel
+	for index, tab := range ui.sshTabs.tabs {
+		for {
+			raw, ok := gtx.Event(pointer.Filter{Target: &tab.dragTag, Kinds: kinds})
+			if !ok {
+				break
+			}
+			pointerEvent, ok := raw.(pointer.Event)
+			if !ok {
+				continue
+			}
+			switch pointerEvent.Kind {
+			case pointer.Press:
+				if !pointerEvent.Buttons.Contain(pointer.ButtonPrimary) {
+					continue
+				}
+				ui.sshTabDrag = sshTabDragState{
+					active:     true,
+					tabID:      tab.ID,
+					startIndex: index,
+					startX:     pointerEvent.Position.X,
+					pointerID:  uint16(pointerEvent.PointerID),
+				}
+				gtx.Execute(pointer.GrabCmd{Tag: &tab.dragTag, ID: pointerEvent.PointerID})
+				return true
+			case pointer.Release:
+				if !ui.sshTabDrag.active || ui.sshTabDrag.tabID != tab.ID || ui.sshTabDrag.pointerID != uint16(pointerEvent.PointerID) {
+					continue
+				}
+				extent := float32(gtx.Dp(230))
+				target := sshTabDragTarget(ui.sshTabDrag.startIndex, pointerEvent.Position.X-ui.sshTabDrag.startX, extent, len(ui.sshTabs.tabs))
+				tabID := ui.sshTabDrag.tabID
+				ui.sshTabDrag.reset()
+				if target >= 0 {
+					ui.sshTabs.move(tabID, target)
+				}
+				return true
+			case pointer.Cancel:
+				if ui.sshTabDrag.active && ui.sshTabDrag.tabID == tab.ID {
+					ui.sshTabDrag.reset()
+					return true
+				}
+			case pointer.Drag:
+				if ui.sshTabDrag.active && ui.sshTabDrag.tabID == tab.ID && ui.sshTabDrag.pointerID == uint16(pointerEvent.PointerID) {
+					return true
+				}
+			}
+		}
+	}
+	return false
+}
+
+func (ui *Window) ensureSSHTabActionButtons() {
+	want := len(sshTabActionSources())
+	if len(ui.sshTabActionButtons) != want {
+		ui.sshTabActionButtons = make([]widget.Clickable, want)
+	}
+}
+
+func (ui *Window) handleSSHTabActions(gtx layout.Context) bool {
+	tab := ui.sshTabs.active()
+	if tab == nil {
+		return false
+	}
+	ui.ensureSSHTabActionButtons()
+	for index, source := range sshTabActionSources() {
+		if !ui.sshTabActionButtons[index].Clicked(gtx) {
+			continue
+		}
+		switch source {
+		case "Duplicate":
+			ui.duplicateSSHTab(tab.ID)
+		case "Reconnect":
+			ui.reconnectSSHTab(tab.ID)
+		case "Rename":
+			ui.openSSHTabRename(tab.ID)
+		case "Pin":
+			ui.sshTabs.setPinned(tab.ID, !tab.Pinned)
+		case "Close others":
+			ui.finishOtherSSHTabHistory(tab.ID)
+			ui.sshTabs.closeOthers(tab.ID)
+			ui.model.Status = ui.text("SSH terminal closed.")
+		case "Close all":
+			ui.finishAllSSHTabHistory()
+			ui.sshTabs.closeAll()
+			ui.model.Status = ui.text("SSH terminal closed.")
+		}
+		return true
+	}
+	return false
+}
+
+func (ui *Window) duplicateSSHTab(tabID string) {
+	tab := ui.sshTabs.duplicate(tabID)
+	if tab == nil {
+		return
+	}
+	ui.model.Error = ""
+	ui.model.Status = ui.text("Connecting")
+	if tab.Local {
+		ui.startLocalTerminalForTab(tab)
+		return
+	}
+	ui.connectSSHTab(tab.ID, tab.HostID, tab.size)
+}
+
+func (ui *Window) reconnectSSHTab(tabID string) {
+	tab := ui.sshTabs.get(tabID)
+	if tab != nil {
+		ui.finishSSHSessionHistory(tab, remote.SSHSessionClosed, "")
+	}
+	if tab == nil || !ui.sshTabs.reconnect(tabID) {
+		return
+	}
+	ui.model.Error = ""
+	ui.model.Status = ui.text("Connecting")
+	if tab.Local {
+		ui.startLocalTerminalForTab(tab)
+		return
+	}
+	ui.connectSSHTab(tab.ID, tab.HostID, tab.size)
+}
+
+func (ui *Window) openSSHTabRename(tabID string) {
+	tab := ui.sshTabs.get(tabID)
+	if tab == nil {
+		return
+	}
+	ui.sshTabRenameID = tabID
+	ui.sshTabRenameEditor.SetText(sshTabDisplayName(tab))
+	ui.sshTabRenameOpen = true
+}
+
+func (ui *Window) closeSSHTabRename() {
+	ui.sshTabRenameOpen = false
+	ui.sshTabRenameID = ""
+	ui.sshTabRenameEditor.SetText("")
+	ui.sshTabRenameClose = widget.Clickable{}
+	ui.sshTabRenameCancel = widget.Clickable{}
+	ui.sshTabRenameSave = widget.Clickable{}
+	ui.sshTabRenameScrim = widget.Clickable{}
+}
+
+func (ui *Window) handleSSHTabRename(gtx layout.Context) {
+	if ui.drainEditors(gtx, &ui.sshTabRenameEditor) {
+		ui.saveSSHTabRename()
+		return
+	}
+	if ui.sshTabRenameClose.Clicked(gtx) || ui.sshTabRenameCancel.Clicked(gtx) || ui.sshTabRenameScrim.Clicked(gtx) || ui.escapePressed(gtx) {
+		ui.closeSSHTabRename()
+		return
+	}
+	if ui.sshTabRenameSave.Clicked(gtx) {
+		ui.saveSSHTabRename()
+	}
+}
+
+func (ui *Window) saveSSHTabRename() {
+	if strings.TrimSpace(ui.sshTabRenameEditor.Text()) == "" {
+		ui.model.Error = ui.text("Tab name is required")
+		return
+	}
+	if ui.sshTabs.rename(ui.sshTabRenameID, ui.sshTabRenameEditor.Text()) {
+		ui.model.Error = ""
+		ui.closeSSHTabRename()
+	}
+}
+
+func (ui *Window) handleSSHTabKeys(gtx layout.Context, tab *sshTab) bool {
+	if tab == nil {
+		return false
+	}
+	for _, filter := range terminalKeyFilters(&tab.input) {
+		for {
+			event, ok := gtx.Event(filter)
+			if !ok {
+				break
+			}
+			pressed, ok := event.(key.Event)
+			if !ok || pressed.State != key.Press {
+				continue
+			}
+			ui.sendSSHTabKey(tab.ID, pressed)
+			return true
+		}
+	}
+	return false
+}
+
+const terminalClipboardMaxBytes = 1 << 20
+
+func (ui *Window) handleSSHTabClipboard(gtx layout.Context, tab *sshTab) bool {
+	if tab == nil {
+		return false
+	}
+	for _, mimeType := range []string{"text/plain", "text/plain;charset=utf-8"} {
+		for {
+			raw, ok := gtx.Event(transfer.TargetFilter{Target: &tab.clipboardTag, Type: mimeType})
+			if !ok {
+				break
+			}
+			dataEvent, ok := raw.(transfer.DataEvent)
+			if !ok || dataEvent.Open == nil {
+				continue
+			}
+			reader := dataEvent.Open()
+			data, err := io.ReadAll(io.LimitReader(reader, terminalClipboardMaxBytes+1))
+			closeErr := reader.Close()
+			if err == nil {
+				err = closeErr
+			}
+			if err != nil {
+				ui.model.Error = err.Error()
+				return true
+			}
+			if len(data) > terminalClipboardMaxBytes {
+				ui.model.Error = "clipboard text exceeds 1 MiB"
+				return true
+			}
+			ui.pasteSSHTabText(tab.ID, string(data))
+			return true
+		}
+	}
+	if tab.copyButton.Clicked(gtx) {
+		ui.copySSHTabSelection(gtx, tab)
+		return true
+	}
+	if tab.pasteButton.Clicked(gtx) {
+		ui.requestSSHTabPaste(gtx, tab)
+		return true
+	}
+	for _, action := range []struct {
+		name key.Name
+		copy bool
+	}{
+		{name: key.Name("C"), copy: true},
+		{name: key.Name("V")},
+	} {
+		for {
+			raw, ok := gtx.Event(key.Filter{
+				Focus:    &tab.input,
+				Name:     action.name,
+				Required: key.ModCtrl | key.ModShift,
+			})
+			if !ok {
+				break
+			}
+			pressed, ok := raw.(key.Event)
+			if !ok || pressed.State != key.Press {
+				continue
+			}
+			if action.copy {
+				ui.copySSHTabSelection(gtx, tab)
+			} else {
+				ui.requestSSHTabPaste(gtx, tab)
+			}
+			return true
+		}
+	}
+	return false
+}
+
+func (ui *Window) copySSHTabSelection(gtx layout.Context, tab *sshTab) bool {
+	if tab == nil {
+		return false
+	}
+	text := tab.selectedTerminalText()
+	if text == "" {
+		ui.model.Status = ui.text("No terminal text is selected.")
+		return false
+	}
+	gtx.Execute(clipboard.WriteCmd{
+		Type: "text/plain",
+		Data: io.NopCloser(strings.NewReader(text)),
+	})
+	return true
+}
+
+func (ui *Window) requestSSHTabPaste(gtx layout.Context, tab *sshTab) bool {
+	if tab == nil || tab.session == nil || tab.session.pty == nil {
+		return false
+	}
+	gtx.Execute(clipboard.ReadCmd{Tag: &tab.clipboardTag})
+	return true
+}
+
+func terminalKeyFilters(focus *widget.Editor) []key.Filter {
+	filters := make([]key.Filter, 0, 22)
+	for _, name := range []key.Name{
+		key.NameLeftArrow,
+		key.NameRightArrow,
+		key.NameUpArrow,
+		key.NameDownArrow,
+		key.NameHome,
+		key.NameEnd,
+		key.NameReturn,
+		key.NameEnter,
+		key.NameTab,
+		key.NameEscape,
+		key.NameDeleteBackward,
+		key.NameDeleteForward,
+		key.NamePageUp,
+		key.NamePageDown,
+		key.NameF1,
+		key.NameF2,
+		key.NameF3,
+		key.NameF4,
+		key.NameF5,
+		key.NameF6,
+		key.NameF7,
+		key.NameF8,
+		key.NameF9,
+		key.NameF10,
+		key.NameF11,
+		key.NameF12,
+	} {
+		filters = append(filters, key.Filter{
+			Focus:    focus,
+			Name:     name,
+			Optional: key.ModCtrl | key.ModShift | key.ModAlt | key.ModSuper,
+		})
+	}
+	for _, name := range []key.Name{"C", "D"} {
+		filters = append(filters, key.Filter{Focus: focus, Name: name, Required: key.ModCtrl})
+	}
+	return filters
 }
 
 func (ui *Window) handleSSHHostForm(gtx layout.Context) {
@@ -379,6 +834,10 @@ func (ui *Window) openSSHHostTab(index int) {
 		return
 	}
 	host := ui.sshHosts[index]
+	if !host.Enabled {
+		ui.model.Error = ui.text("Host is disabled.")
+		return
+	}
 	ui.sshHostIndex = index
 	ui.sshHostID = host.ID
 	tab := ui.sshTabs.open(host)
@@ -388,6 +847,9 @@ func (ui *Window) openSSHHostTab(index int) {
 }
 
 func (ui *Window) connectSSHTab(tabID, hostID string, size image.Point) {
+	if tab := ui.sshTabs.get(tabID); tab != nil {
+		ui.startSSHSessionHistory(tab)
+	}
 	go func() {
 		ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 		defer cancel()
@@ -401,7 +863,7 @@ func (ui *Window) connectSSHTab(tabID, hostID string, size image.Point) {
 			ui.queueSSHTabApply(func() { ui.failSSHTab(tabID, err) })
 			return
 		}
-		client, term, err := dialSSHTerminal(creds, size)
+		client, term, err := ui.openPooledSSHTerminal(ctx, creds, size)
 		if err == nil {
 			ui.queueSSHTabApply(func() { ui.attachSSHTab(tabID, client, term) }, func() {
 				_ = term.Close()
@@ -414,11 +876,11 @@ func (ui *Window) connectSSHTab(tabID, hostID string, size image.Point) {
 			ui.queueSSHTabApply(func() { ui.failSSHTab(tabID, err) })
 			return
 		}
-		ui.queueSSHTabApply(func() { ui.beginFingerprintConfirmTab(tabID, hostID, fingerprint, creds, size) })
+		ui.queueSSHTabApply(func() { ui.beginFingerprintConfirmTab(tabID, hostID, fingerprint, size) })
 	}()
 }
 
-func (ui *Window) connectSSHTabWithFingerprint(tabID, hostID, fingerprint string, creds remote.SSHHostCredentials, size image.Point) {
+func (ui *Window) connectSSHTabWithFingerprint(tabID, hostID, fingerprint string, size image.Point) {
 	go func() {
 		ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 		defer cancel()
@@ -431,8 +893,12 @@ func (ui *Window) connectSSHTabWithFingerprint(tabID, hostID, fingerprint string
 			ui.queueSSHTabApply(func() { ui.failSSHTab(tabID, err) })
 			return
 		}
-		creds.TrustedFingerprint = fingerprint
-		client, term, err := dialSSHTerminal(creds, size)
+		creds, err := session.SSHHostCredentials(ctx, hostID)
+		if err != nil {
+			ui.queueSSHTabApply(func() { ui.failSSHTab(tabID, err) })
+			return
+		}
+		client, term, err := ui.openPooledSSHTerminal(ctx, creds, size)
 		if err != nil {
 			ui.queueSSHTabApply(func() { ui.failSSHTab(tabID, err) })
 			return
@@ -478,11 +944,25 @@ func (ui *Window) queueSSHTabApply(apply func(), cleanup ...func()) bool {
 
 func (ui *Window) failSSHTab(tabID string, err error) {
 	if ui.sshTabs.fail(tabID, err) {
+		if tab := ui.sshTabs.get(tabID); tab != nil {
+			message := ""
+			if err != nil {
+				message = err.Error()
+			}
+			ui.finishSSHSessionHistory(tab, remote.SSHSessionFailed, message)
+		}
 		ui.model.Status = ui.text("Connection failed")
 	}
 }
 
 func (ui *Window) closeSSHTab(tabID string) {
+	if ui.sshTabDrag.active && ui.sshTabDrag.tabID == tabID {
+		ui.sshTabDrag.reset()
+	}
+	tab := ui.sshTabs.get(tabID)
+	if tab != nil {
+		ui.finishSSHSessionHistory(tab, remote.SSHSessionClosed, "")
+	}
 	if ui.sshTabs.close(tabID) != nil {
 		ui.model.Status = ui.text("SSH terminal closed.")
 	}
@@ -490,15 +970,22 @@ func (ui *Window) closeSSHTab(tabID string) {
 
 func (ui *Window) retrySSHTab(tabID string) {
 	tab := ui.sshTabs.get(tabID)
+	if tab != nil {
+		ui.finishSSHSessionHistory(tab, remote.SSHSessionClosed, "")
+	}
 	if tab == nil || !ui.sshTabs.retry(tabID) {
 		return
 	}
 	ui.model.Error = ""
 	ui.model.Status = ui.text("Connecting")
+	if tab.Local {
+		ui.startLocalTerminalForTab(tab)
+		return
+	}
 	ui.connectSSHTab(tab.ID, tab.HostID, tab.size)
 }
 
-func (ui *Window) beginFingerprintConfirmTab(tabID, hostID, fingerprint string, creds remote.SSHHostCredentials, size image.Point) {
+func (ui *Window) beginFingerprintConfirmTab(tabID, hostID, fingerprint string, size image.Point) {
 	if ui.sshTabs.get(tabID) == nil {
 		return
 	}
@@ -507,15 +994,19 @@ func (ui *Window) beginFingerprintConfirmTab(tabID, hostID, fingerprint string, 
 		if ui.sshTabs.get(tabID) == nil {
 			return
 		}
-		ui.connectSSHTabWithFingerprint(tabID, hostID, fingerprint, creds, size)
+		ui.connectSSHTabWithFingerprint(tabID, hostID, fingerprint, size)
 	})
 }
 
-func (ui *Window) attachSSHTab(tabID string, client *sshclient.Client, term ptyTerminal) {
+func (ui *Window) attachSSHTab(tabID string, client interface{ Close() error }, term ptyTerminal) {
 	tab := ui.sshTabs.get(tabID)
 	if tab == nil {
-		_ = term.Close()
-		_ = client.Close()
+		if term != nil {
+			_ = term.Close()
+		}
+		if client != nil {
+			_ = client.Close()
+		}
 		return
 	}
 	if tab.session != nil {
@@ -526,8 +1017,23 @@ func (ui *Window) attachSSHTab(tabID string, client *sshclient.Client, term ptyT
 	tab.State = sshTabConnected
 	tab.Error = ""
 	ui.sshTabs.activate(tabID)
+	ui.finishSSHSessionHistory(tab, remote.SSHSessionConnected, "")
 	ui.model.Status = ui.text("Connected")
 	ui.readSSHTab(tabID, tab.session)
+}
+
+func (ui *Window) openPooledSSHTerminal(ctx context.Context, credentials remote.SSHHostCredentials, size image.Point) (*sshConnectionLease, ptyTerminal, error) {
+	if ui == nil {
+		return nil, nil, errors.New("ssh connection pool: window is not available")
+	}
+	if ui.sshPool == nil {
+		ui.sshPool = newSSHConnectionPool()
+	}
+	factory := ui.sshTransportFactory
+	if factory == nil {
+		factory = newSSHClientTransport
+	}
+	return openPooledSSHTerminal(ctx, ui.sshPool, credentials, size, factory)
 }
 
 func (ui *Window) readSSHTab(tabID string, session *sshTabSession) {
@@ -549,6 +1055,15 @@ func (ui *Window) readSSHTab(tabID string, session *sshTabSession) {
 			if err != nil {
 				ui.queueSSHTabApply(func() {
 					if ui.sshTabs.endSession(tabID, session, err) {
+						status := remote.SSHSessionFailed
+						message := err.Error()
+						if errors.Is(err, io.EOF) {
+							status = remote.SSHSessionClosed
+							message = ""
+						}
+						if tab := ui.sshTabs.get(tabID); tab != nil {
+							ui.finishSSHSessionHistory(tab, status, message)
+						}
 						ui.model.Status = ui.text("Connection failed")
 					}
 				})
@@ -575,6 +1090,84 @@ func (ui *Window) sendSSHTabInput(tabID string) bool {
 		return false
 	}
 	tab.input.SetText("")
+	return true
+}
+
+func (ui *Window) pasteSSHTabText(tabID, text string) bool {
+	data, multiline := prepareTerminalPaste(text)
+	if len(data) == 0 {
+		return true
+	}
+	if !multiline {
+		return ui.writeSSHTabBytes(tabID, data)
+	}
+	if ui.busy {
+		return false
+	}
+	ui.requestConfirm(
+		ui.text("Paste multiple lines?"),
+		ui.text("Pasting multiple lines may execute several commands."),
+		func() { ui.writeSSHTabBytes(tabID, data) },
+	)
+	return true
+}
+
+func (ui *Window) writeSSHTabBytes(tabID string, data []byte) bool {
+	if len(data) == 0 {
+		return true
+	}
+	tab := ui.sshTabs.get(tabID)
+	if tab == nil || tab.session == nil || tab.session.pty == nil {
+		return false
+	}
+	n, err := tab.session.pty.Write(data)
+	if err != nil || n != len(data) {
+		if err == nil {
+			err = io.ErrShortWrite
+		}
+		ui.failSSHTab(tabID, err)
+		return false
+	}
+	return true
+}
+
+func (ui *Window) sendSSHTabKey(tabID string, event key.Event) bool {
+	data := encodeTerminalKey(event)
+	if len(data) == 0 {
+		return false
+	}
+	return ui.writeSSHTabBytes(tabID, data)
+}
+
+// resizeSSHTab keeps the remote PTY and the tab's terminal screen in sync.
+// Local shell pipes do not expose a resize operation, so their emulator can
+// still follow the available content size without failing the layout update.
+func (ui *Window) resizeSSHTab(tabID string, size image.Point) bool {
+	if size.X < 1 || size.Y < 1 {
+		return false
+	}
+	tab := ui.sshTabs.get(tabID)
+	if tab == nil || tab.State != sshTabConnected || tab.session == nil || tab.session.pty == nil {
+		return false
+	}
+	frame := tab.emulator.Frame()
+	if frame.Width == size.X && frame.Height == size.Y {
+		tab.size = size
+		return true
+	}
+	if resizer, ok := tab.session.pty.(interface{ Resize(int, int) error }); ok {
+		if err := resizer.Resize(size.X, size.Y); err != nil {
+			ui.sshTabs.fail(tabID, err)
+			return false
+		}
+	}
+	if tab.emulator != nil {
+		if err := tab.emulator.Resize(size.X, size.Y); err != nil {
+			ui.sshTabs.fail(tabID, err)
+			return false
+		}
+	}
+	tab.size = size
 	return true
 }
 
@@ -666,6 +1259,8 @@ func (ui *Window) remoteSSHTabsView(gtx layout.Context) layout.Dimensions {
 		return layout.Inset{Top: unit.Dp(cardPadding), Bottom: unit.Dp(cardPadding), Left: unit.Dp(cardPadding), Right: unit.Dp(cardPadding)}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
 			return layout.Flex{Axis: layout.Vertical, Gap: gtx.Dp(rowGap)}.Layout(gtx,
 				layout.Rigid(func(gtx layout.Context) layout.Dimensions { return ui.remoteSSHTabBar(gtx) }),
+				layout.Rigid(func(gtx layout.Context) layout.Dimensions { return ui.remoteSSHTabActions(gtx) }),
+				layout.Rigid(func(gtx layout.Context) layout.Dimensions { return ui.remoteSSHTabViewSwitcher(gtx) }),
 				layout.Rigid(func(gtx layout.Context) layout.Dimensions { return ui.remoteSSHTabToolbar(gtx) }),
 				layout.Flexed(1, func(gtx layout.Context) layout.Dimensions {
 					tab := ui.sshTabs.active()
@@ -679,6 +1274,48 @@ func (ui *Window) remoteSSHTabsView(gtx layout.Context) layout.Dimensions {
 	})
 }
 
+func (ui *Window) remoteSSHTabViewSwitcher(gtx layout.Context) layout.Dimensions {
+	tab := ui.sshTabs.active()
+	if tab == nil || tab.State != sshTabConnected {
+		return layout.Dimensions{}
+	}
+	return layout.Flex{Axis: layout.Horizontal, Alignment: layout.Middle, Gap: gtx.Dp(fieldGap)}.Layout(gtx,
+		layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+			return ui.button(gtx, &tab.terminalViewButton, "Terminal", tab.View == sshTabViewTerminal)
+		}),
+		layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+			if tab.Local {
+				return layout.Dimensions{}
+			}
+			return ui.button(gtx, &tab.sftpViewButton, "SFTP", tab.View == sshTabViewSFTP)
+		}),
+	)
+}
+
+func (ui *Window) remoteSSHTabActions(gtx layout.Context) layout.Dimensions {
+	tab := ui.sshTabs.active()
+	if tab == nil {
+		return layout.Dimensions{}
+	}
+	ui.ensureSSHTabActionButtons()
+	ui.sshTabActionList.Axis = layout.Horizontal
+	return ui.sshTabActionList.Layout(gtx, len(sshTabActionSources()), func(gtx layout.Context, index int) layout.Dimensions {
+		sources := sshTabActionSources()
+		if index < 0 || index >= len(sources) {
+			return layout.Dimensions{}
+		}
+		source := sources[index]
+		if source == "Pin" && tab.Pinned {
+			source = "Unpin"
+		}
+		gtx.Constraints.Min.X = gtx.Dp(108)
+		gtx.Constraints.Max.X = gtx.Dp(144)
+		return layout.Inset{Right: unit.Dp(fieldGap)}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+			return ui.button(gtx, &ui.sshTabActionButtons[index], source, false)
+		})
+	})
+}
+
 func (ui *Window) remoteSSHTabBar(gtx layout.Context) layout.Dimensions {
 	ui.terminalTabList.Axis = layout.Horizontal
 	return ui.terminalTabList.Layout(gtx, len(ui.sshTabs.tabs), func(gtx layout.Context, index int) layout.Dimensions {
@@ -686,6 +1323,9 @@ func (ui *Window) remoteSSHTabBar(gtx layout.Context) layout.Dimensions {
 		gtx.Constraints.Min.X = gtx.Dp(168)
 		gtx.Constraints.Max.X = gtx.Dp(230)
 		return layout.Flex{Axis: layout.Horizontal, Alignment: layout.Middle, Gap: gtx.Dp(fieldGap)}.Layout(gtx,
+			layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+				return ui.sshTabDragHandle(gtx, tab)
+			}),
 			layout.Flexed(1, func(gtx layout.Context) layout.Dimensions {
 				return ui.button(gtx, &tab.tabButton, ui.sshTabTitle(index), tab.ID == ui.sshTabs.activeID)
 			}),
@@ -694,6 +1334,31 @@ func (ui *Window) remoteSSHTabBar(gtx layout.Context) layout.Dimensions {
 			}),
 		)
 	})
+}
+
+func (ui *Window) sshTabDragHandle(gtx layout.Context, tab *sshTab) layout.Dimensions {
+	if tab == nil {
+		return layout.Dimensions{}
+	}
+	return layout.Stack{Alignment: layout.Center}.Layout(gtx,
+		layout.Stacked(func(gtx layout.Context) layout.Dimensions {
+			gtx.Constraints.Min.X = gtx.Dp(24)
+			label := material.Body2(ui.theme, "::")
+			label.Color = colorMuted
+			return layout.Inset{Top: unit.Dp(fieldGap), Bottom: unit.Dp(fieldGap), Left: unit.Dp(fieldGap), Right: unit.Dp(fieldGap)}.Layout(gtx, label.Layout)
+		}),
+		layout.Expanded(func(gtx layout.Context) layout.Dimensions {
+			area := clip.Rect{Max: gtx.Constraints.Min}.Push(gtx.Ops)
+			event.Op(gtx.Ops, &tab.dragTag)
+			if ui.sshTabDrag.active && ui.sshTabDrag.tabID == tab.ID {
+				pointer.CursorGrabbing.Add(gtx.Ops)
+			} else {
+				pointer.CursorGrab.Add(gtx.Ops)
+			}
+			area.Pop()
+			return layout.Dimensions{Size: gtx.Constraints.Min}
+		}),
+	)
 }
 
 func (ui *Window) sshTabTitle(index int) string {
@@ -710,9 +1375,9 @@ func (ui *Window) sshTabTitle(index int) string {
 		}
 	}
 	if count > 1 {
-		return fmt.Sprintf("%s #%d", tab.HostName, ordinal)
+		return fmt.Sprintf("%s #%d", sshTabDisplayName(tab), ordinal)
 	}
-	return tab.HostName
+	return sshTabDisplayName(tab)
 }
 
 func (ui *Window) remoteSSHTabToolbar(gtx layout.Context) layout.Dimensions {
@@ -724,7 +1389,7 @@ func (ui *Window) remoteSSHTabToolbar(gtx layout.Context) layout.Dimensions {
 		layout.Flexed(1, func(gtx layout.Context) layout.Dimensions {
 			return layout.Flex{Axis: layout.Vertical, Gap: gtx.Dp(fieldGap)}.Layout(gtx,
 				layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-					label := material.Subtitle1(ui.theme, tab.HostName)
+					label := material.Subtitle1(ui.theme, sshTabDisplayName(tab))
 					label.Color = colorText
 					return label.Layout(gtx)
 				}),
@@ -736,6 +1401,18 @@ func (ui *Window) remoteSSHTabToolbar(gtx layout.Context) layout.Dimensions {
 			)
 		}),
 		layout.Rigid(func(gtx layout.Context) layout.Dimensions { return ui.sshTabStatus(gtx, tab) }),
+		layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+			if tab.State != sshTabConnected || tab.View != sshTabViewTerminal {
+				return layout.Dimensions{}
+			}
+			return ui.button(gtx, &tab.copyButton, "Copy", false)
+		}),
+		layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+			if tab.State != sshTabConnected || tab.View != sshTabViewTerminal {
+				return layout.Dimensions{}
+			}
+			return ui.button(gtx, &tab.pasteButton, "Paste", false)
+		}),
 		layout.Rigid(func(gtx layout.Context) layout.Dimensions {
 			if tab.State != sshTabError {
 				return layout.Dimensions{}
@@ -781,8 +1458,14 @@ func (ui *Window) remoteSSHTabContent(gtx layout.Context, tab *sshTab) layout.Di
 			return label.Layout(gtx)
 		})
 	}
+	if tab.View == sshTabViewSFTP {
+		return ui.remoteSSHTabSFTPContent(gtx, tab)
+	}
 	return layout.Flex{Axis: layout.Vertical, Gap: gtx.Dp(sectionGap)}.Layout(gtx,
 		layout.Flexed(1, func(gtx layout.Context) layout.Dimensions {
+			if tab.emulator != nil {
+				return ui.terminalFrameView(gtx, tab)
+			}
 			return ui.outputList(gtx, &tab.outputList, tab.outputSnapshot(), "Terminal output will appear here", true)
 		}),
 		layout.Rigid(func(gtx layout.Context) layout.Dimensions {
@@ -796,6 +1479,351 @@ func (ui *Window) remoteSSHTabContent(gtx layout.Context, tab *sshTab) layout.Di
 			)
 		}),
 	)
+}
+
+func (ui *Window) remoteSSHTabSFTPContent(gtx layout.Context, tab *sshTab) layout.Dimensions {
+	if tab == nil || tab.sftpBrowser == nil {
+		return layout.Center.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+			label := material.Body1(ui.theme, ui.text("Opening SFTP..."))
+			label.Color = colorMuted
+			return label.Layout(gtx)
+		})
+	}
+	tab.syncSFTPEntryWidgets()
+	browser := tab.sftpBrowser
+	return layout.Flex{Axis: layout.Vertical, Gap: gtx.Dp(rowGap)}.Layout(gtx,
+		layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+			return layout.Flex{Axis: layout.Horizontal, Alignment: layout.Middle, Gap: gtx.Dp(fieldGap)}.Layout(gtx,
+				layout.Flexed(1, func(gtx layout.Context) layout.Dimensions {
+					label := material.Body2(ui.theme, ui.text("Remote path")+": "+browser.Path)
+					label.Color = colorText
+					return label.Layout(gtx)
+				}),
+				layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+					return ui.button(gtx, &tab.sftpParentButton, "Parent folder", false)
+				}),
+				layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+					return ui.button(gtx, &tab.sftpRefreshButton, "Refresh files", false)
+				}),
+			)
+		}),
+		layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+			return ui.remoteSSHTabSFTPActions(gtx, tab)
+		}),
+		layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+			if tab.sftpLoading {
+				label := material.Caption(ui.theme, ui.text("Loading remote files..."))
+				label.Color = colorMuted
+				return label.Layout(gtx)
+			}
+			if tab.sftpError != "" {
+				label := material.Caption(ui.theme, tab.sftpError)
+				label.Color = colorDanger
+				return label.Layout(gtx)
+			}
+			return layout.Dimensions{}
+		}),
+		layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+			return ui.sftpInfoPanel(gtx, tab)
+		}),
+		layout.Flexed(1, func(gtx layout.Context) layout.Dimensions {
+			return ui.sftpEntriesDropArea(gtx, tab)
+		}),
+	)
+}
+
+func (ui *Window) sftpEntriesDropArea(gtx layout.Context, tab *sshTab) layout.Dimensions {
+	if tab == nil || tab.sftpBrowser == nil {
+		return layout.Dimensions{}
+	}
+	tab.sftpList.Axis = layout.Vertical
+	return layout.Stack{}.Layout(gtx,
+		layout.Stacked(func(gtx layout.Context) layout.Dimensions {
+			if len(tab.sftpBrowser.Entries) == 0 {
+				return layout.Center.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+					label := material.Body2(ui.theme, ui.text("No files in this folder."))
+					label.Color = colorMuted
+					return label.Layout(gtx)
+				})
+			}
+			return tab.sftpList.Layout(gtx, len(tab.sftpBrowser.Entries), func(gtx layout.Context, index int) layout.Dimensions {
+				if index < 0 || index >= len(tab.sftpBrowser.Entries) {
+					return layout.Dimensions{}
+				}
+				return ui.sftpEntryRow(gtx, tab, index)
+			})
+		}),
+		layout.Expanded(func(gtx layout.Context) layout.Dimensions {
+			size := gtx.Constraints.Min
+			area := clip.Rect{Max: size}.Push(gtx.Ops)
+			event.Op(gtx.Ops, &tab.sftpDropTag)
+			area.Pop()
+			return layout.Dimensions{Size: size}
+		}),
+	)
+}
+
+func (ui *Window) sftpInfoPanel(gtx layout.Context, tab *sshTab) layout.Dimensions {
+	if tab == nil {
+		return layout.Dimensions{}
+	}
+	lines := sftpInfoLines(tab.sftpInfo)
+	if len(lines) == 0 {
+		return layout.Dimensions{}
+	}
+	return layout.Inset{Top: unit.Dp(fieldGap), Bottom: unit.Dp(fieldGap)}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+		return layout.Flex{Axis: layout.Vertical, Gap: gtx.Dp(fieldGap)}.Layout(gtx,
+			layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+				label := material.Body2(ui.theme, ui.text("File information"))
+				label.Color = colorText
+				return label.Layout(gtx)
+			}),
+			layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+				return layout.Flex{Axis: layout.Vertical}.Layout(gtx, infoLineChildren(ui.theme, lines[1:])...)
+			}),
+		)
+	})
+}
+
+func infoLineChildren(theme *material.Theme, lines []string) []layout.FlexChild {
+	children := make([]layout.FlexChild, 0, len(lines))
+	for _, line := range lines {
+		line := line
+		children = append(children, layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+			label := material.Caption(theme, line)
+			label.Color = colorMuted
+			return label.Layout(gtx)
+		}))
+	}
+	return children
+}
+
+func (ui *Window) remoteSSHTabSFTPActions(gtx layout.Context, tab *sshTab) layout.Dimensions {
+	if tab == nil {
+		return layout.Dimensions{}
+	}
+	ui.ensureSFTPActionButtons(tab)
+	actions := sftpActionSources()
+	tab.sftpActionList.Axis = layout.Horizontal
+	return tab.sftpActionList.Layout(gtx, len(actions), func(gtx layout.Context, index int) layout.Dimensions {
+		if index < 0 || index >= len(actions) || index >= len(tab.sftpActionButtons) {
+			return layout.Dimensions{}
+		}
+		gtx.Constraints.Min.X = gtx.Dp(118)
+		gtx.Constraints.Max.X = gtx.Dp(176)
+		return layout.Inset{Right: unit.Dp(fieldGap)}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+			return ui.button(gtx, &tab.sftpActionButtons[index], actions[index], false)
+		})
+	})
+}
+
+func (ui *Window) sftpEntryRow(gtx layout.Context, tab *sshTab, index int) layout.Dimensions {
+	if tab == nil || tab.sftpBrowser == nil || index < 0 || index >= len(tab.sftpBrowser.Entries) || index >= len(tab.sftpSelectionWidgets) {
+		return layout.Dimensions{}
+	}
+	entry := tab.sftpBrowser.Entries[index]
+	return layout.Inset{Top: unit.Dp(fieldGap), Bottom: unit.Dp(fieldGap)}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+		return layout.Flex{Axis: layout.Horizontal, Alignment: layout.Middle, Gap: gtx.Dp(fieldGap)}.Layout(gtx,
+			layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+				return material.CheckBox(ui.theme, &tab.sftpSelectionWidgets[index], "").Layout(gtx)
+			}),
+			layout.Flexed(1, func(gtx layout.Context) layout.Dimensions {
+				name := entry.Name
+				if entry.Directory {
+					name += "/"
+				}
+				if entry.Directory {
+					return ui.button(gtx, &tab.sftpOpenButtons[index], name, false)
+				}
+				label := material.Body2(ui.theme, name)
+				label.Color = colorText
+				return label.Layout(gtx)
+			}),
+			layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+				metadata := sftpEntryMetadata(entry)
+				label := material.Caption(ui.theme, metadata)
+				label.Color = colorMuted
+				return label.Layout(gtx)
+			}),
+		)
+	})
+}
+
+func sftpEntryMetadata(entry sftpEntry) string {
+	if entry.Directory {
+		return "directory"
+	}
+	if entry.Size < 0 {
+		return ""
+	}
+	return fmt.Sprintf("%d B", entry.Size)
+}
+
+func (ui *Window) terminalFrameView(gtx layout.Context, tab *sshTab) layout.Dimensions {
+	if tab == nil || tab.emulator == nil {
+		return layout.Dimensions{}
+	}
+	cellSize := image.Point{
+		X: gtx.Dp(unit.Dp(8)),
+		Y: gtx.Dp(unit.Dp(20)),
+	}
+	if viewport := gtx.Constraints.Max; viewport.X > 0 && viewport.Y > 0 {
+		ui.resizeSSHTab(tab.ID, terminalGridSize(viewport, cellSize))
+	}
+	frame := tab.emulator.Frame()
+	appearance := normalizeTerminalAppearance(ui.terminalAppearance)
+	if !tab.Local {
+		for _, host := range ui.sshHosts {
+			if host.ID == tab.HostID {
+				appearance = terminalAppearanceForHost(appearance, host)
+				break
+			}
+		}
+	}
+	ui.handleTerminalSelection(gtx, tab, frame, cellSize)
+	tab.outputList.Axis = layout.Vertical
+	return layout.Stack{}.Layout(gtx,
+		layout.Stacked(func(gtx layout.Context) layout.Dimensions {
+			return tab.outputList.Layout(gtx, len(frame.Cells), func(gtx layout.Context, index int) layout.Dimensions {
+				if index < 0 || index >= len(frame.Cells) {
+					return layout.Dimensions{}
+				}
+				return ui.terminalFrameRow(gtx, frame.Cells[index], index, tab.selection, appearance)
+			})
+		}),
+		layout.Expanded(func(gtx layout.Context) layout.Dimensions {
+			size := gtx.Constraints.Min
+			area := clip.Rect{Max: size}.Push(gtx.Ops)
+			event.Op(gtx.Ops, &tab.terminalTag)
+			event.Op(gtx.Ops, &tab.clipboardTag)
+			pointer.CursorText.Add(gtx.Ops)
+			area.Pop()
+			return layout.Dimensions{Size: size}
+		}),
+	)
+}
+
+func (ui *Window) handleTerminalSelection(gtx layout.Context, tab *sshTab, frame terminalFrame, cellSize image.Point) {
+	if tab == nil || frame.Width < 1 || frame.Height < 1 {
+		return
+	}
+	kinds := pointer.Press | pointer.Drag | pointer.Release | pointer.Cancel
+	for {
+		raw, ok := gtx.Event(pointer.Filter{Target: &tab.terminalTag, Kinds: kinds})
+		if !ok {
+			return
+		}
+		event, ok := raw.(pointer.Event)
+		if !ok {
+			continue
+		}
+		cell := terminalCellAt(
+			image.Pt(int(event.Position.X), int(event.Position.Y)),
+			cellSize,
+			image.Pt(frame.Width, frame.Height),
+		)
+		switch event.Kind {
+		case pointer.Press:
+			if event.Buttons.Contain(pointer.ButtonSecondary) {
+				ui.requestSSHTabPaste(gtx, tab)
+				continue
+			}
+			if !event.Buttons.Contain(pointer.ButtonPrimary) {
+				continue
+			}
+			tab.clearTerminalSelection()
+			tab.selectionAnchor = cell
+			tab.selectionPointerID = uint16(event.PointerID)
+			tab.selecting = true
+			gtx.Execute(pointer.GrabCmd{Tag: &tab.terminalTag, ID: event.PointerID})
+		case pointer.Drag:
+			if tab.selecting && tab.selectionPointerID == uint16(event.PointerID) {
+				tab.selection = terminalDragSelection(tab.selectionAnchor, cell)
+			}
+		case pointer.Release:
+			if !tab.selecting || tab.selectionPointerID != uint16(event.PointerID) {
+				continue
+			}
+			tab.selection = terminalDragSelection(tab.selectionAnchor, cell)
+			tab.selecting = false
+			if tab.selection.active {
+				ui.copySSHTabSelection(gtx, tab)
+			}
+		case pointer.Cancel:
+			tab.selecting = false
+		}
+	}
+}
+
+func (ui *Window) terminalFrameRow(gtx layout.Context, cells []terminalCell, row int, selection terminalSelection, appearance terminalAppearance) layout.Dimensions {
+	if len(cells) == 0 {
+		return layout.Dimensions{}
+	}
+	type cellRun struct {
+		style    terminalCell
+		text     string
+		selected bool
+	}
+	runs := make([]cellRun, 0, len(cells))
+	for column, cell := range cells {
+		selected := terminalCellSelected(selection, image.Pt(column, row))
+		if len(runs) > 0 && runs[len(runs)-1].selected == selected && sameTerminalCellStyle(runs[len(runs)-1].style, cell) {
+			runs[len(runs)-1].text += cell.Text
+			continue
+		}
+		runs = append(runs, cellRun{style: cell, text: cell.Text, selected: selected})
+	}
+	children := make([]layout.FlexChild, 0, len(runs))
+	for _, run := range runs {
+		run := run
+		children = append(children, layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+			foreground, background := terminalCellColors(run.style, appearance)
+			if run.selected {
+				foreground = color.NRGBA{R: 0xff, G: 0xff, B: 0xff, A: 0xff}
+				background = color.NRGBA{R: 0x16, G: 0x62, B: 0x72, A: 0xff}
+			}
+			label := material.Label(ui.theme, unit.Sp(appearance.FontSize), run.text)
+			label.Font.Typeface = terminalTypeface(appearance.Font)
+			label.Color = foreground
+			if run.style.Bold {
+				label.Font.Weight = font.Bold
+			}
+			if run.style.Italics {
+				label.Font.Style = font.Italic
+			}
+			return layout.Stack{}.Layout(gtx,
+				layout.Expanded(func(gtx layout.Context) layout.Dimensions {
+					paint.FillShape(gtx.Ops, background, clip.Rect{Max: gtx.Constraints.Min}.Op())
+					return layout.Dimensions{Size: gtx.Constraints.Min}
+				}),
+				layout.Stacked(label.Layout),
+			)
+		}))
+	}
+	return layout.Flex{Axis: layout.Horizontal}.Layout(gtx, children...)
+}
+
+func sameTerminalCellStyle(left, right terminalCell) bool {
+	return left.Foreground == right.Foreground &&
+		left.Background == right.Background &&
+		left.Bold == right.Bold &&
+		left.Italics == right.Italics &&
+		left.Underline == right.Underline &&
+		left.Reverse == right.Reverse
+}
+
+func terminalCellForeground(cell terminalCell) color.NRGBA {
+	if cell.Reverse {
+		return colorBackground
+	}
+	switch cell.Foreground {
+	case terminalColorRed:
+		return colorDanger
+	case terminalColorDefault:
+		return colorText
+	default:
+		return colorText
+	}
 }
 
 func (ui *Window) remoteSSHSidebar(gtx layout.Context) layout.Dimensions {
@@ -820,7 +1848,7 @@ func (ui *Window) remoteSSHSidebar(gtx layout.Context) layout.Dimensions {
 					if len(ui.sshHosts) == 0 {
 						return material.Body2(ui.theme, ui.text("No SSH hosts yet.")).Layout(gtx)
 					}
-					return ui.remoteList.Layout(gtx, len(ui.sshHosts), func(gtx layout.Context, index int) layout.Dimensions {
+					return ui.remoteList.Layout(gtx, len(ui.sshHostIndices), func(gtx layout.Context, index int) layout.Dimensions {
 						gtx.Constraints.Min.X = gtx.Constraints.Max.X
 						return ui.sshHostRow(gtx, index)
 					})
@@ -830,17 +1858,21 @@ func (ui *Window) remoteSSHSidebar(gtx layout.Context) layout.Dimensions {
 	})
 }
 
-func (ui *Window) sshHostRow(gtx layout.Context, index int) layout.Dimensions {
-	if index < 0 || index >= len(ui.sshHosts) || index >= len(ui.sshHostButtons) || index >= len(ui.sshHostEditButtons) {
+func (ui *Window) sshHostRow(gtx layout.Context, visibleIndex int) layout.Dimensions {
+	if visibleIndex < 0 || visibleIndex >= len(ui.sshHostIndices) || visibleIndex >= len(ui.sshHostButtons) || visibleIndex >= len(ui.sshHostEditButtons) {
+		return layout.Dimensions{}
+	}
+	index := ui.sshHostIndices[visibleIndex]
+	if index < 0 || index >= len(ui.sshHosts) {
 		return layout.Dimensions{}
 	}
 	host := ui.sshHosts[index]
 	return layout.Flex{Axis: layout.Horizontal, Alignment: layout.Middle, Gap: gtx.Dp(fieldGap)}.Layout(gtx,
 		layout.Flexed(1, func(gtx layout.Context) layout.Dimensions {
-			return ui.button(gtx, &ui.sshHostButtons[index], host.Name, ui.sshHostIndex == index)
+			return ui.button(gtx, &ui.sshHostButtons[visibleIndex], host.Name, ui.sshHostIndex == index)
 		}),
 		layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-			return ui.button(gtx, &ui.sshHostEditButtons[index], "Edit", false)
+			return ui.button(gtx, &ui.sshHostEditButtons[visibleIndex], "Edit", false)
 		}),
 	)
 }
@@ -866,7 +1898,7 @@ func (ui *Window) remoteSSHHostStrip(gtx layout.Context) layout.Dimensions {
 						return material.Body2(ui.theme, ui.text("No SSH hosts yet.")).Layout(gtx)
 					}
 					ui.sshHostStripList.Axis = layout.Horizontal
-					return ui.sshHostStripList.Layout(gtx, len(ui.sshHosts), func(gtx layout.Context, index int) layout.Dimensions {
+					return ui.sshHostStripList.Layout(gtx, len(ui.sshHostIndices), func(gtx layout.Context, index int) layout.Dimensions {
 						itemWidth := gtx.Dp(220)
 						if itemWidth > gtx.Constraints.Max.X {
 							itemWidth = gtx.Constraints.Max.X
