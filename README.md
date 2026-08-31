@@ -4,19 +4,27 @@ Windows 優先的 Go 桌面 SSH 工作區，使用 Gio GUI。應用程式以遠�
 
 ## 功能
 
-- 遠端登入唯一入口：啟動後輸入驗證服務 URL、帳號與密碼；密碼不會儲存。
+- 遠端登入唯一入口：啟動後輸入驗證服務 URL、帳號與密碼；可選擇以 Windows DPAPI 記住密碼並於下次啟動自動登入。
 - SSH 主機管理：常駐主機清單搭配新增/編輯彈出表單；支援密碼或私鑰（可加密碼短語）認證。
 - 主機 key fingerprint 驗證（TOFU）：首次連線顯示指紋，確認後存回服務端。
-- 分頁式互動 PTY 終端機；同一主機可同時開啟多個獨立連線，切換分頁不會中斷連線。連線由客戶端直連，不經服務端轉發。
+- 分頁式互動 PTY 終端機；同一主機可同時開啟多個獨立連線，切換分頁不會中斷連線。支援終端外觀設定與視窗調整；連線由客戶端直連，不經服務端轉發。
+- 工作區提供主機搜尋、最近連線、群組摘要、六個功能模組導覽，以及可執行命令的本機終端。
+- 工作區也提供 SFTP 瀏覽、檔案操作、拖放上傳、可暫停/續傳的傳輸佇列與底部傳輸面板。
+- 連接埠轉送支援 local、remote 與 dynamic SOCKS 規則，並以節流方式同步執行狀態與流量。
+- 快捷指令、可重用私鑰身份、主機指紋歷史、工作階段記錄與版本化加密工作區匯入/匯出支援遠端同步。
+- SFTP 支援遠端瀏覽、多選、建立資料夾、重新命名、刪除確認、檔案資訊、符號連結、原生檔案選擇器、拖放上傳與可暫停/續傳的傳輸佇列；傳輸面板固定在工作區底部，顯示速率與剩餘時間，並可驗證指定的 SHA-256。
+- 連接埠轉送支援 local、remote 與 dynamic SOCKS 規則，提供本機啟停、狀態及流量資訊，並以節流方式將執行狀態與流量計數同步至服務端。
+- 快捷指令、可重用私鑰身份、主機指紋歷史與工作階段記錄支援遠端同步；秘密只在需要時透過授權 API 取得，工作階段記錄只保存連線 metadata。
+- 工作區支援版本化加密匯出、匯入預覽與衝突決策；含秘密匯出時必須使用匯出密碼，匯入套用在服務端以交易方式完成。
 - 帳號層級 SSH 開關：管理員關閉帳號 SSH 功能時，GUI 顯示「此帳號未啟用 SSH 存取」提示，仍可登出。
 - 關閉視窗即結束進程：退出時同步撤銷遠端 session（逾時 2 秒），不殘留背景進程。
 - GUI 支援英文與繁體中文；右上角「中 / EN」可即時切換，偏好保存於本機非敏感設定檔。
 
 ## 遠端登入
 
-1. 啟動後輸入驗證服務 URL、帳號與密碼（密碼不會儲存）。
+1. 啟動後輸入驗證服務 URL、帳號與密碼；「記住密碼」預設關閉，勾選後才會以 Windows DPAPI 保存。
 2. 服務端核發短期 access token 與輪換式 refresh token（以 Windows DPAPI 加密保存在本機）。
-3. 之後啟動可一鍵還原 session。
+3. 之後啟動會自動嘗試使用已保存的密碼登入；驗證失敗會立即清除保存值並要求重新輸入。登出會保留已記住的密碼。
 
 驗證服務（Node.js + Fastify + SQLite + Telegram Bot 管理介面）位於獨立倉庫：https://github.com/s12ryt/s12ryt-ssh-auth-server
 
@@ -29,15 +37,18 @@ Windows 優先的 Go 桌面 SSH 工作區，使用 Gio GUI。應用程式以遠�
 - 新增、編輯與刪除主機在彈出表單內完成；關閉有未儲存內容的表單前會先確認。
 - 認證支援密碼或私鑰（可加密碼短語），兩者至少其一；憑證以 AES-256-GCM 加密保存在服務端，連線時經 HTTPS 下發，只在記憶體中使用。
 - 首次連線會顯示主機金鑰指紋（TOFU），確認後存回服務端；主機或連接埠變更時指紋會重設。
+- 終端外觀支援帳號預設與每主機覆寫；主機可清除覆寫並恢復繼承帳號預設。
 - 管理員可用 Bot 指令開關帳號 SSH 功能；關閉時 GUI 顯示未啟用提示，API 拒絕存取。
+- 停用單一主機會立即關閉該主機的終端、SFTP、連接埠轉送、背景連線與進行中傳輸；重新啟用後可重新連線或重試傳輸。刪除主機 metadata 不會強制關閉既有終端分頁。
+- 快捷指令的秘密與可重用私鑰身份由服務端分離保存；列表與工作階段記錄不包含私鑰、密語、命令秘密或終端輸出。
 
 注意：撤銷 session 或關閉 SSH 功能不會切斷已建立的 SSH 連線，只會阻止後續憑證下發。
 
 ## 安全模型
 
 - 服務端是唯一信任邊界。SSH 憑證是唯一會下發的憑證（個人主機，HTTPS 下發、記憶體使用、每次下發都寫稽核）。
-- 本機只保存：驗證服務 URL、帳號名稱、裝置 ID（remote-preferences JSON）、語言偏好（preferences JSON）與 DPAPI 加密的 refresh token。
-- 密碼與 SSH 憑證內容不落地。
+- 本機只保存：驗證服務 URL、帳號名稱、裝置 ID（remote-preferences JSON）、語言偏好（preferences JSON），以及由 Windows DPAPI 保護的 refresh token 與使用者明確選擇保存的登入密碼。
+- 未勾選「記住密碼」時，登入密碼不會保存；SSH 憑證內容不落地。
 
 ## 建置
 
@@ -72,18 +83,18 @@ go build ./...
 
 - `remote-preferences.json`：驗證服務 URL、帳號與隨機 device ID，不保存密碼或 token。
 - `preferences.json`：版本化語言偏好，只保存 `en` 或 `zh-TW`。
-- `securestore/`：Windows DPAPI 保護的 rotation refresh token；短期 access token 只存在記憶體。
+- `securestore/`：Windows DPAPI 保護的 rotation refresh token 與可選的登入密碼；短期 access token 只存在記憶體。
 
 ## 專案結構
 
 ```
 main.go                  應用程式入口（Gio 標準退出模式、路徑與服務組裝）
 internal/config          SSH profile 型別（含私鑰內容 KeyData）
-internal/gui             Gio GUI（遠端登入、工作區、SSH 主機與終端機）
+internal/gui             Gio GUI（遠端登入、工作區、SSH/SFTP/隧道/快捷指令/金鑰/指紋/歷史）
 internal/i18n            英文/繁體中文字典
-internal/remote          遠端 API client（登入、token 輪換、資源概覽、SSH hosts）
+internal/remote          遠端 API client（登入、token 輪換、SSH workspace 資源與匯入匯出）
 internal/securestore     DPAPI 保護的 secret 儲存
-internal/ssh             SSH 客戶端（密碼/私鑰認證、TOFU 指紋、PTY 終端機）
+internal/ssh             SSH 客戶端（認證、TOFU、PTY、VT、SFTP 與連接埠轉送）
 agent/                   需求契約與工作紀錄
 ```
 
@@ -95,6 +106,8 @@ go vet ./...
 ```
 
 測試涵蓋 securestore、SSH fingerprint/逾時/PTY、遠端 API client、GUI state 與工作區行為。
+
+目前尚未列為完整可用功能的契約項目包括遠端 checksum 自動取得與更進階的跨模組自動化；這些項目不會以空按鈕或假資料呈現。Windows 本機終端已使用 ConPTY，其他平台保留 pipe fallback。
 
 本機 Windows 防毒曾誤判 `internal/i18n` 的 Go 測試執行檔，因此該 package 的測試由 GitHub Actions Windows runner 執行；其他 Go 套件仍可在本機個別驗證。
 
