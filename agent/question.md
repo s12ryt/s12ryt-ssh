@@ -111,6 +111,74 @@
 - Go remote 模式不顯示 SSH、不允許編輯 connection secret；URL/account 可保存，refresh token 只存在 DPAPI，密碼不落盤。
 - Node 與 Go 新增行為皆依 RED -> GREEN -> REFACTOR 建立測試；GitHub CI 的 Go 與 Node jobs、vet/typecheck/build、安全掃描均通過。
 
+## 需求：依 `ssh範例.png` 重建完整 SSH 工作區（2026-08-30）
+
+### 契約優先級與參考來源
+
+- 使用者明確指示：「按照 ./ssh範例.png 施工,之後不要問我了」。本章是前述 MVP SSH UI 契約的後續擴充與覆蓋；未回答的衍生決策由實作者依既有架構、風險、相容性與可維護性直接採用，不再追加需求詢問。
+- `ssh範例.png` 是視覺與資訊架構的 source of truth：深黑桌面工作區、左側固定導覽、主機首頁的搜尋／動作列／最近連線／群組卡片／主機卡片，以及底部可收合的全域傳輸面板。
+- 本輪同步修改 `F:\Project\ssh\s12ryt-ssh` 與 `F:\Project\ssh\s12ryt-auth-server`；兩個倉庫各自測試、各自建置。未經另行授權不得 commit 或 push。
+- 使用者提供的 `ssh範例.png` 僅作為本地設計參考，不納入產品提交或執行檔資產。
+
+### 工作區資訊架構
+
+- 左側固定一級模組依序為：主機、連接埠轉送、快捷指令、金鑰管理、主機指紋、工作階段記錄；目前模組以主內容區切換，不把所有功能硬塞進終端分頁。
+- 主機首頁採搜尋列（名稱、位址、群組、標籤及組合查詢）、新增主機下拉動作、本機終端動作、最近連線、群組卡片及主機卡片。主機卡片顯示啟用／收藏／認證／最近連線等可掃描資訊，點選主機開啟工作分頁。
+- 主機開啟後提供 Terminal 與 SFTP 工作分頁；連接埠轉送、快捷指令可從工作區或全域模組進入；設定採 modal。Transfers 是跨主機的底部可收合併行佇列。
+- `本機終端` 必須是可用動作，不得只渲染空按鈕；Windows 端採 CGO=0 可建置的 ConPTY/原生程序方案，關閉時釋放程序與管線。
+- 桌面寬版保留固定導覽與內容留白；窄視窗將導覽收斂為可水平捲動的模組列，主機卡片與分頁使用穩定尺寸，所有文字不得溢出或互相覆蓋。沿用現有深 teal 色系與 4/8/12/16/20/24/32 間距節奏，不新增圖示或 UI 框架依賴。
+
+### 主機、群組與同步資料
+
+- SSH 主機支援：名稱、host、port、username、認證方式（密碼或私鑰二選一）、啟用／停用、收藏、排序、巢狀群組、多 tags、ProxyJump、壓縮、TCP／SSH handshake／PTY timeout、keepalive interval、failure count、idle timeout、啟動命令、初始目錄、環境變數、自動重連與本機覆寫設定。
+- 同時有密碼與私鑰時必須明確選擇單一認證方式，不自動 fallback；不實作 SSH Agent、SSH 憑證、OpenSSH 匯入／匯出。
+- 本機金鑰檔選擇後讀入內容並遠端加密保存，不保存本機路徑作為跨裝置設定；金鑰管理模組管理可重用的遠端加密私鑰 identity，但不提供 agent socket。
+- 分組採一台主機一個可巢狀群組、多個 tags；搜尋支援名稱／位址、群組／標籤、收藏、啟用、認證方式、最近連線、跳板使用與全文組合查詢。
+- 排序支援收藏置頂、手動拖曳、名稱升降冪、最近使用、建立時間；排序與目前篩選模式遠端同步。群組刪除連同子群組與主機級聯刪除，必須使用強確認。
+- 複製主機使用服務端 clone：服務端在信任邊界內解密後重新加密完整設定與秘密，桌面端不接觸秘密；複製後名稱由 UI 提供唯一預設值。
+- 所有帳號預設、主機設定、群組、tags、收藏、排序、連線設定與工作階段設定遠端同步；帳號 default 與主機 override 動態繼承，UI 顯示 inherited/custom。
+- API 使用資源版本號或 ETag；更新衝突不可靜默覆蓋，UI 顯示差異並提供重新載入、覆蓋、另存複本。
+- Host disabled 時立即停止全部 Terminal、SFTP、轉送與背景連線；既有本機資源必須可重入關閉。
+
+### 終端與分頁
+
+- 同一主機可多開 Terminal／SFTP 分頁；每次主機卡片連線建立新的工作分頁。分頁可新建、複製設定、重新連線、目前工作階段重新命名、固定、關閉其他／全部及拖曳排序；不做最近關閉復原。
+- tab duplicate 只複製設定並建立新連線，不複製 output/input；rename、pin、排序只影響目前啟動，不遠端保存。
+- 每個 Terminal tab 保有獨立 transport/session/output/input／PTY 資源；切換不斷線，close 才關閉自身。連線失敗保留在原 tab，可取消、手動重試、Retry／Close；認證或 host key 錯誤不自動重試，其餘自動重連預設關閉，啟用後以最多 5 次、1/2/4/8/16 秒指數退避。
+- 每階段呈現 resolving／TCP connecting／SSH handshake／PTY opening／connected／reconnecting／error／closed，顯示延遲、詳細錯誤與可複製錯誤；不新增連線日誌匯出或桌面通知。
+- 終端必須使用成熟可測的 Go VT 核心並包裝本專案介面；候選套件若標示 experimental 不直接暴露到 UI。保留 CGO=0，渲染需支援 cell、Unicode 寬度、游標、色彩、清除／移動、alternate screen、resize、scrollback 與常見 VT/ANSI 狀態。
+- 完整終端按鍵原樣送遠端：Ctrl-C、Ctrl-D、方向、Home、End、功能鍵；不增加新的全域快捷鍵。支援 Windows 系統剪貼簿、選取即複製、右鍵貼上、工具列／內容選單複製貼上、Ctrl+Shift+C/V，以及多行貼上確認。
+- 終端外觀支援內建與系統等寬字型、字級縮放、內建與自訂 palette、帳號級預設與每主機覆寫。未選的清除／下載輸出、搜尋輸出、全螢幕、終端錄製不加入本輪。
+
+### SFTP 與傳輸
+
+- SFTP 工作分頁提供遠端瀏覽、建立、重新命名、刪除前確認、重新整理、檔案資訊、符號連結與多選批次操作；不做雙欄本機瀏覽、隱藏檔切換、直接路徑輸入、權限／擁有者編輯。
+- 上傳／下載使用多檔佇列，支援可設定並行數、暫停／繼續、斷點續傳、衝突詢問、拖放、速度／剩餘時間、完整性驗證與失敗重試。以成熟 `github.com/pkg/sftp` 作協定核心，resume/checksum 由傳輸服務以 offset、size／hash 或可用遠端驗證實作。
+- Gio 使用 `gioui.org/x/explorer` 原生檔案／資料夾選擇器；選檔阻塞操作放在可取消背景工作，不能卡住 Gio frame loop。Transfer item 必須有明確狀態、進度與資源清理。
+
+### 轉送、快捷指令、金鑰與工作階段
+
+- Port forwarding 支援 local、remote、dynamic SOCKS；同主機多規則、每規則啟用／停用、執行中啟停、自動啟動、狀態與流量統計，規則遠端保存。生命週期同時支援跟隨 Terminal tab 與獨立背景 SSH connection；背景 tunnel 不佔用終端 tab，但仍受 host disabled 與設定版本隔離。
+- ProxyJump 支援已保存主機鏈與自由輸入鏈；自由輸入節點可引用已保存認證設定並覆寫 host／port／user。禁止循環鏈；每一跳獨立 host key 驗證、timeout 與錯誤狀態。
+- Snippets 支援參數變數、秘密安全保存、帳號遠端同步、搜尋列表與執行面板，填入參數後直接 Execute；不做 snippet 群組／tag、host variables、preview、只填入與使用歷史。
+- Host key 模組支援首次 TOFU、key 變更強制阻擋、查看／複製、清除後重新取得、手動 fingerprint、多演算法 fingerprint 與變更歷史。
+- Session history 保存時間、主機、狀態、延遲與錯誤等 metadata，可由參考圖中的「工作階段記錄」查看；不保存終端內容、不做錄製回放、不做診斷匯出。
+- 全域 connection pool 以「主機設定版本」隔離；同一設定版本的 Terminal、SFTP 與跟隨式 tunnel 可共享 transport，設定變更建立新 transport，舊工作繼續使用舊版本；背景 tunnel 永遠獨立連線，故障不得污染其他版本消費者。
+
+### 遠端登入與匯入匯出
+
+- 遠端登入增加 `Remember password`，預設不勾選；勾選後以 Windows DPAPI user-scope 保存，登出保留；保存密碼啟動時自動提交登入。已保存密碼驗證失敗立即清除並要求重新輸入。
+- 主機／群組／tags／規則／片段可匯出；預設排除 secrets。使用者明確勾選含秘密時，以自有加密封裝格式及獨立匯出密碼產生檔案；匯入必須解密驗證，先顯示衝突預覽，再選覆蓋／略過／複製，禁止部分成功造成未報告的資料遺失。
+- secrets 仍只在服務端 AES-GCM 或 DPAPI 信任邊界保存；API metadata、錯誤、稽核與 logs 不得含明文密碼、私鑰、token 或匯出密碼。
+
+### TDD、驗收與交付限制
+
+- 新行為依模組拆成 RED -> GREEN -> REFACTOR：Go GUI／state／SSH／SFTP／transfer 與 Node domain／repository／HTTP API 各有可隔離測試；先證明缺少行為的預期失敗，再寫最小實作。
+- 必須測試：主機搜尋／群組／排序／批次與 clone secret 邊界、sync conflict、host-key history、認證選擇、timeout／keepalive／reconnect、tab lifecycle／pool isolation、VT cell／按鍵／clipboard、SFTP CRUD／queue／resume／conflict／retry、tunnel lifecycle／SOCKS、snippet secret、session metadata、disabled cascade、remember-password failure、encrypted export/import。
+- Go 驗收：`gofmt`、`go test ./... -count=1`、`go vet ./...`、`go build ./...`、CGO=0 Windows GUI build；Node 驗收：`npm run format:check`、`npm run lint`、`npm run typecheck`、`npm test`、`npm run build`、production dependency audit。
+- 幀渲染在既有環境沒有完整自動化基礎，除可測 state／layout constraint 外，以參考圖對照的程式碼審查與可建置驗證補足；若桌面 GUI、race detector 或原生檔案／ConPTY 測試受 Windows 工具限制，完成報告必須列出實際錯誤，不得宣稱通過。
+- README、API schema、migration、`agent/項目表.md`、`agent/deep_todos.md`、`agent/memory.md` 必須同步反映實際已完成範圍；未完成模組不得以空畫面或 placeholder 宣稱完成。
+
 ## 不在本次範圍
 
 - 不建立獨立遠端帳號服務；vault backend 只提供密文儲存。

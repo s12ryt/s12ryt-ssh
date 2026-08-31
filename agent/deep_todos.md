@@ -200,3 +200,64 @@
 - [x] 回歸：`go test ./... -count=1` 七個 package 全綠；`go vet ./...`、`go build ./...` 通過；本輪 Go 檔 gofmt 無差異；`git diff --check` 通過。
 - 限制：`go test -race ./internal/gui` 因本機沒有 gcc 無法執行；gopls 未安裝；未手動啟動 Gio 桌面幀，依契約以狀態測試、build 與 layout 程式碼審查替代。既有 `internal/config/config.go`、`internal/ssh/client_test.go` 格式問題未納入本次範圍。
 - git：使用者已確認將本批變更拆成 5 個原子提交並直接推送 `origin/main`；遠端同步結果以 GitHub 與最終報告為準。
+
+## 2026-08-31：工作階段記錄頁與 SSH 生命週期
+
+- [x] Node auth server：新增 `ssh_session_history` migration v8、metadata model、account/host 隔離的 list/create/update API；只保存 host snapshot、狀態、延遲、開始/結束時間與錯誤，不保存命令或終端輸出。
+- [x] Go remote：新增工作階段記錄 model、建立/更新/列表 client 與 httptest fixture，保留 optional session history API，不破壞既有 `RemoteSession` 介面。
+- [x] GUI state/page：新增 thread-safe history store、搜尋、唯讀歷史頁、狀態/延遲/時間/錯誤 metadata 顯示、空結果處理與登出清理。
+- [x] 生命週期：每個遠端 SSH tab 使用 attempt token；連線、成功、失敗、EOF、關閉、重試與批次關閉會以目前 attempt 更新歷史，stale async result 不得污染新 attempt；歷史 API 失敗不阻斷 SSH 連線。
+- [x] TDD RED→GREEN：歷史 schema/service/http、Go client、store/filter/status/details、stale attempt/late creation 與 tab connected/closed lifecycle 均先有失敗測試，再完成最小實作；`sshSessionHistoryDetails` 僅暴露持久化 metadata。
+- [x] 驗證：Go `go test ./... -count=1`、`go vet ./...`、`go build ./...` 全綠；Node `npm test -- --runInBand` 79/79、`npm run typecheck`、`npm run build` 全綠；本輪變更檔格式檢查通過。
+- 限制：`go test -race` 因 Windows 環境缺少 gcc 無法執行；gopls 未安裝；未手動啟動 Gio GUI，畫面依契約以 state 測試、build 與 layout 程式碼審查替代；其他尚未完成功能仍不可冒充完成。
+
+## 2026-08-31：登入記住密碼與自動登入
+
+- [x] 遠端服務層新增 `LoginWithOptions`；保留舊 `Login` 相容，未勾選記住密碼時會清除既有保存值，只有登入成功後才保存新密碼。
+- [x] 記住的登入密碼使用獨立 `remote/password/` secure-store key，與 refresh token 的 `remote/refresh/` key 分離；Windows 實作沿用 user-scoped DPAPI，密碼不寫入普通 preferences。
+- [x] 新增 `RememberedPassword` 與 `ForgetRememberedPassword`，登出只撤銷 refresh token、保留使用者明確保存的密碼；忘記操作具備冪等性。
+- [x] GUI 登入表單新增預設關閉的 Remember password checkbox、Windows 保護提示；啟動時載入保存密碼並只自動嘗試一次登入。
+- [x] 自動登入的驗證或資源載入失敗會清除保存密碼、清空輸入並要求重新輸入；手動登入失敗保留使用者剛輸入的密碼，不誤刪保存資料。
+- [x] TDD RED→GREEN：secure-store key/保存語意、登出保留、忘記密碼、啟動自動登入、自動失敗清除與手動失敗保留均先以測試固定行為，再完成 service/GUI 接線。
+- [x] 驗證：Go `go test ./... -count=1`、`go vet ./...`、`go build ./...` 通過；Node `npm test -- --runInBand` 79/79、`npm run typecheck`、`npm run build` 通過；本輪未提交或推送。
+- 限制：`go test -race` 因 Windows 缺少 gcc 無法執行；gopls 未安裝；未手動啟動 Gio GUI；Node 全域 format check 仍有既有未格式化檔案，但本輪未修改 Node 原始碼，相關既有風險維持記錄。
+
+## 2026-08-31：主機停用資源級聯
+
+- [x] `sshTabStore.closeHost` 只移除指定主機分頁，鎖外關閉每個 PTY/SFTP/session lease；刪除遠端 host metadata 不觸發此級聯。
+- [x] `sshTunnelStore.stopHost` 停止指定主機已執行或啟動中的轉送；晚到 runtime 必須被拒絕並立即釋放，不得在停用後重新掛回。
+- [x] `sshConnectionPool.setHostEnabled` 以 HostID 阻擋新 acquisition、detach 既有與 pending transport；重新啟用後可建立新 transport，舊 lease 不會 double-close。
+- [x] `transferManager.setHostEnabled` 將指定主機 queued/running/paused 傳輸改為 failed、取消 worker，停用期間拒絕 enqueue/retry，重新啟用後可重試。
+- [x] `applySSHHosts` 集中同步主機 availability：停用時完成分頁歷史、關閉終端與 SFTP、停止隧道、拆除 pool、失敗傳輸並清理相關 SFTP modal／衝突；未受影響主機資源保持運作。
+- [x] TDD RED→GREEN：四層純 state 測試、Window 級級聯、刪除不級聯、晚到隧道 runtime 與 `Host is disabled.` i18n 均先確認失敗，再完成最小實作。
+- [x] GUI package 與 i18n 回歸通過；完整 Go/Node 回歸結果以本輪最終驗證紀錄為準。
+
+## 2026-08-31：工作區加密匯入與匯出
+
+- [x] Node auth server：新增版本化 `s12ryt-ssh-workspace` v1 opaque package；不含秘密時輸出 metadata，含秘密時使用密碼衍生金鑰與 AES-GCM 加密，錯誤密碼與竄改資料使用一致錯誤語意。
+- [x] Node service/repository/HTTP：新增工作區 export、import preview 與 import apply；支援 host/tunnel/snippet/key 的 create、overwrite、skip、copy，host reference 會重新映射，套用在單一交易內完成並回傳 counts/items，不回傳 payload 或 secrets。
+- [x] Go remote：新增 export、preview、apply request/response model 與 authenticated client methods，保留 resolutions 與顯式密碼欄位。
+- [x] Go GUI：新增 opaque import state、16 MiB package 讀寫限制、原生 Gio Explorer import/export chooser、含秘密匯出密碼驗證、preview conflict modal、overwrite/skip/copy 決策與 apply；秘密不進 metadata store，視窗關閉／登出會清理敏感狀態。
+- [x] TDD RED→GREEN：封裝加密／竄改／衝突規劃、service transaction/rollback、HTTP bearer、Go client、GUI state/file boundary、chooser cancellation、preview/apply 與衝突按鈕穩定映射均先建立失敗測試，再完成最小實作。
+- [x] 驗證：主 repo `go test ./... -count=1`、`go vet ./...`、`go build ./...` 通過；auth server `npm test -- --runInBand` 89/89、`npm run typecheck`、`npm run build` 通過；相關 Go 檔與本輪 Node 檔格式檢查通過。
+- 限制：`go test -race` 因 Windows 缺少 gcc 無法執行；gopls 未安裝；未手動啟動 Gio GUI，依既定契約以 state 測試、build 與 layout 程式碼審查替代；尚未將本輪變更 commit/push，`ssh範例.png`未納入。
+
+## 2026-08-31：SFTP 傳輸 metrics、完整性與拖放
+
+- [x] 傳輸項目新增開始時間、最近進度、傳輸速率與剩餘時間；面板顯示 bytes、百分比、B/s 與 ETA，完成項目不顯示 ETA。
+- [x] 傳輸 worker 支援可選 SHA-256 驗證；digest 不符回傳專用完整性錯誤，並保留既有續傳、暫停、重試、取消與短寫入處理。
+- [x] 新增 URI list／Windows 路徑解析與 1 MiB payload 上限；忽略註解和空行，拒絕非 file URI、相對路徑、無效編碼及超大資料；所有 drop reader 都會關閉。
+- [x] 將 Gio transfer target 限制在每個 SFTP 分頁的檔案列表，合法拖放沿用既有上傳候選與衝突決策流程，空資料夾也可接受第一個檔案。
+- [x] TDD RED→GREEN：metrics、ETA、digest mismatch、URI parsing、大小邊界、reader lifecycle、錯誤翻譯與真正 drop-to-transfer 流程均先建立失敗測試，再完成最小實作。
+- 限制：`ExpectedSHA256` 目前是可選欄位，enqueue 不會自動從遠端取得 checksum；從非零 offset 續傳時目前只驗證本次讀取區段，不代表完整原始檔案；未手動啟動 Gio GUI，幀以 state/layout/code review 替代；本輪未 commit/push，`ssh範例.png`未納入。
+
+## 2026-08-31：終端外觀、Windows ConPTY 與隧道 runtime 同步
+
+- [x] 終端 frame renderer 支援內建／系統等寬字型、字級與 palette 正規化、host override 合併、ANSI/default/reverse/selection 顏色；相關純 state 測試先 RED 後 GREEN。
+- [x] Windows 本機終端改用 `github.com/UserExistsError/conpty`，提供 Read/Write/Resize/Close；非 Windows 保留原 pipe fallback，Windows ConPTY backend 與命令輸出測試通過。
+- [x] Node auth server新增隧道 runtime update API，驗證 account ownership 與非負安全整數流量；runtime 回報不遞增設定 version。Go remote client與httptest fixture同步支援。
+- [x] GUI隧道 store新增五秒節流、in-flight guard、成功基線與失敗重試；啟動立即回報 running，手動停止、主機停用、規則刪除、登出與視窗關閉都在釋放 runtime 前擷取最終流量並回報 stopped。
+- [x] TDD RED→GREEN：外觀正規化、ConPTY backend、Node service/HTTP、Go client、runtime節流、失敗重試、最終流量與GUI start/stop同步均先有失敗證據。
+- [x] 驗證：Go `go test ./... -count=1`、`go vet ./...`、`go build ./...`；Node `npm test -- --runInBand` 90/90、`npm run typecheck`、`npm run lint`、`npm run build` 全部通過。
+- [x] Node/Go workspace preferences支援帳號終端外觀預設與主機 partial override；主機可明確清除覆寫並恢復帳號預設，HTTP schema與版本更新保持一致。
+- 限制：runtime API同步為best-effort，不會因遠端回報失敗中斷本機轉送；完整外觀以目前已支援的字型、字級與palette為限；race detector與Gio手動畫面驗證仍受既有環境限制。
